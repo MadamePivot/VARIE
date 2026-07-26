@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Archivio Progetti</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#FAF8F4;
+    --paper-dim:#F1EDE3;
+    --line:#DEDACB;
+    --ink:#20281F;
+    --ink-soft:#5B6357;
+    --teal:#2F6F5E;
+    --teal-dark:#234F43;
+    --danger:#A8453A;
+    --tag-bg:#EFE7D8;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'Inter',sans-serif;
+    min-height:100vh;
+  }
+  .mono{font-family:'IBM Plex Mono',monospace;}
+
+  /* ---------- LOGIN ---------- */
+  #login-screen{
+    min-height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:24px;
+  }
+  .login-card{
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:4px;
+    padding:40px 36px;
+    width:100%;
+    max-width:380px;
+    box-shadow:0 1px 2px rgba(32,40,31,0.04);
+  }
+  .login-mark{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    letter-spacing:0.12em;
+    color:var(--teal);
+    text-transform:uppercase;
+    margin-bottom:6px;
+  }
+  .login-card h1{
+    font-size:24px;
+    margin:0 0 28px;
+    font-weight:600;
+    letter-spacing:-0.01em;
+  }
+  label{
+    display:block;
+    font-size:12px;
+    font-weight:600;
+    color:var(--ink-soft);
+    text-transform:uppercase;
+    letter-spacing:0.04em;
+    margin-bottom:6px;
+  }
+  input[type=email], input[type=password], input[type=text], select, textarea{
+    width:100%;
+    padding:10px 12px;
+    border:1px solid var(--line);
+    border-radius:3px;
+    background:var(--paper);
+    font-family:'Inter',sans-serif;
+    font-size:14px;
+    color:var(--ink);
+    margin-bottom:16px;
+  }
+  input:focus, select:focus, textarea:focus{
+    outline:2px solid var(--teal);
+    outline-offset:1px;
+  }
+  button{
+    font-family:'Inter',sans-serif;
+    font-weight:600;
+    font-size:14px;
+    border:none;
+    border-radius:3px;
+    padding:11px 18px;
+    cursor:pointer;
+  }
+  .btn-primary{
+    background:var(--teal);
+    color:#fff;
+    width:100%;
+  }
+  .btn-primary:hover{background:var(--teal-dark);}
+  .btn-primary:disabled{opacity:0.5;cursor:not-allowed;}
+  #login-error{
+    color:var(--danger);
+    font-size:13px;
+    margin:-4px 0 16px;
+    display:none;
+  }
+
+  /* ---------- APP ---------- */
+  #app-screen{display:none;}
+  header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:20px 32px;
+    border-bottom:1px solid var(--line);
+    background:#fff;
+  }
+  header .brand{display:flex;align-items:baseline;gap:10px;}
+  header .brand .mono{font-size:11px;color:var(--teal);letter-spacing:0.1em;text-transform:uppercase;}
+  header h1{font-size:18px;margin:0;font-weight:600;}
+  #logout-btn{
+    background:transparent;
+    color:var(--ink-soft);
+    border:1px solid var(--line);
+    font-weight:500;
+  }
+  #logout-btn:hover{border-color:var(--ink-soft);color:var(--ink);}
+
+  main{
+    max-width:920px;
+    margin:0 auto;
+    padding:32px 24px 80px;
+  }
+
+  .panel{
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:4px;
+    padding:24px;
+    margin-bottom:28px;
+  }
+  .panel h2{
+    font-size:14px;
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+    color:var(--ink-soft);
+    margin:0 0 18px;
+    font-weight:600;
+  }
+  .upload-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:0 16px;
+  }
+  .upload-grid .full{grid-column:1 / -1;}
+  #file-input-wrap{
+    border:1px dashed var(--line);
+    border-radius:3px;
+    padding:14px;
+    margin-bottom:16px;
+    font-size:13px;
+    color:var(--ink-soft);
+    background:var(--paper-dim);
+  }
+  #file-input-wrap input{margin:0;border:none;padding:0;background:transparent;}
+  #upload-status{
+    font-size:13px;
+    margin-top:8px;
+    display:none;
+  }
+  #upload-status.ok{color:var(--teal-dark);}
+  #upload-status.err{color:var(--danger);}
+
+  /* ledger / register list */
+  .project-group{margin-bottom:26px;}
+  .project-group h3{
+    font-size:16px;
+    margin:0 0 10px;
+    font-weight:600;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .project-group h3 .count{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    color:var(--ink-soft);
+    background:var(--tag-bg);
+    padding:2px 7px;
+    border-radius:10px;
+  }
+  .ledger{
+    border-left:2px solid var(--line);
+    margin-left:4px;
+  }
+  .ledger-row{
+    position:relative;
+    padding:10px 0 10px 22px;
+    border-bottom:1px solid var(--paper-dim);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+  }
+  .ledger-row::before{
+    content:'';
+    position:absolute;
+    left:-5px;
+    top:16px;
+    width:8px;
+    height:8px;
+    border-radius:50%;
+    background:var(--teal);
+  }
+  .ledger-row:last-child{border-bottom:none;}
+  .ledger-main{min-width:0;}
+  .ledger-tag{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;
+    background:var(--tag-bg);
+    color:var(--teal-dark);
+    padding:2px 7px;
+    border-radius:3px;
+    margin-right:8px;
+  }
+  .ledger-file{font-size:13px;color:var(--ink-soft);}
+  .ledger-note{font-size:13px;color:var(--ink-soft);margin-top:2px;font-style:italic;}
+  .ledger-date{font-size:11px;color:var(--ink-soft);margin-top:2px;}
+  .ledger-actions{display:flex;gap:8px;flex-shrink:0;}
+  .icon-btn{
+    background:transparent;
+    border:1px solid var(--line);
+    color:var(--ink-soft);
+    padding:6px 10px;
+    font-size:12px;
+    font-weight:500;
+  }
+  .icon-btn:hover{border-color:var(--teal);color:var(--teal-dark);}
+  .icon-btn.danger:hover{border-color:var(--danger);color:var(--danger);}
+
+  #empty-state{
+    text-align:center;
+    padding:40px 20px;
+    color:var(--ink-soft);
+    font-size:14px;
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-mark mono">Archivio · Accesso privato</div>
+    <h1>Archivio Progetti</h1>
+    <form id="login-form">
+      <label for="email">Email</label>
+      <input type="email" id="email" required autocomplete="username">
+      <label for="password">Password</label>
+      <input type="password" id="password" required autocomplete="current-password">
+      <div id="login-error"></div>
+      <button type="submit" class="btn-primary" id="login-btn">Accedi</button>
+    </form>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app-screen">
+  <header>
+    <div class="brand">
+      <h1>Archivio Progetti</h1>
+      <span class="mono">registro versioni</span>
+    </div>
+    <button id="logout-btn">Esci</button>
+  </header>
+
+  <main>
+    <div class="panel">
+      <h2>Carica nuova versione</h2>
+      <form id="upload-form">
+        <div class="upload-grid">
+          <div>
+            <label for="nome-progetto">Nome progetto</label>
+            <input type="text" id="nome-progetto" list="progetti-esistenti" placeholder="es. gestione-magazzino" required>
+            <datalist id="progetti-esistenti"></datalist>
+          </div>
+          <div>
+            <label for="versione">Versione</label>
+            <input type="text" id="versione" placeholder="es. v3 o 2026-07-26" required>
+          </div>
+          <div class="full">
+            <label for="note">Note (opzionale)</label>
+            <textarea id="note" rows="2" placeholder="Cosa è cambiato in questa versione?"></textarea>
+          </div>
+        </div>
+        <div id="file-input-wrap">
+          <input type="file" id="file-input" required>
+        </div>
+        <button type="submit" class="btn-primary" id="upload-btn" style="width:auto;">Carica versione</button>
+        <div id="upload-status"></div>
+      </form>
+    </div>
+
+    <div class="panel">
+      <h2>I tuoi progetti</h2>
+      <div id="projects-list"></div>
+      <div id="empty-state" style="display:none;">Nessun progetto ancora caricato. Usa il modulo sopra per iniziare.</div>
+    </div>
+  </main>
+</div>
+
+<script type="module">
+  import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+  const SUPABASE_URL = 'https://qwexiqicubanmodaebua.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF3ZXhpcWljdWJhbm1vZGFlYnVhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NTk4MjUsImV4cCI6MjA5OTUzNTgyNX0.Z24OBYkn5SDO41IbfJYljO7yua6d_FNB4_rj5agnDPs';
+  const BUCKET = 'progetti';
+
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  const loginScreen = document.getElementById('login-screen');
+  const appScreen = document.getElementById('app-screen');
+  const loginForm = document.getElementById('login-form');
+  const loginBtn = document.getElementById('login-btn');
+  const loginError = document.getElementById('login-error');
+  const uploadForm = document.getElementById('upload-form');
+  const uploadBtn = document.getElementById('upload-btn');
+  const uploadStatus = document.getElementById('upload-status');
+  const projectsList = document.getElementById('projects-list');
+  const emptyState = document.getElementById('empty-state');
+  const progettiEsistenti = document.getElementById('progetti-esistenti');
+
+  function showApp(){ loginScreen.style.display='none'; appScreen.style.display='block'; loadProjects(); }
+  function showLogin(){ loginScreen.style.display='flex'; appScreen.style.display='none'; }
+
+  supabase.auth.getSession().then(({data})=>{ data.session ? showApp() : showLogin(); });
+  supabase.auth.onAuthStateChange((_event, session)=>{ session ? showApp() : showLogin(); });
+
+  loginForm.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    loginError.style.display='none';
+    loginBtn.disabled = true;
+    loginBtn.textContent = 'Accesso in corso…';
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    loginBtn.disabled = false;
+    loginBtn.textContent = 'Accedi';
+    if(error){
+      loginError.textContent = 'Email o password non corrette.';
+      loginError.style.display='block';
+    }
+  });
+
+  document.getElementById('logout-btn').addEventListener('click', async ()=>{
+    await supabase.auth.signOut();
+  });
+
+  function fmtDate(iso){
+    const d = new Date(iso);
+    return d.toLocaleDateString('it-IT', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  }
+
+  async function loadProjects(){
+    const { data, error } = await supabase
+      .from('progetti_versioni')
+      .select('*')
+      .order('created_at', { ascending:false });
+
+    if(error){
+      projectsList.innerHTML = '';
+      emptyState.style.display='block';
+      emptyState.textContent = 'Errore nel caricamento: ' + error.message;
+      return;
+    }
+
+    if(!data || data.length===0){
+      projectsList.innerHTML='';
+      emptyState.style.display='block';
+      emptyState.textContent = 'Nessun progetto ancora caricato. Usa il modulo sopra per iniziare.';
+      progettiEsistenti.innerHTML = '';
+      return;
+    }
+    emptyState.style.display='none';
+
+    const groups = {};
+    for(const row of data){
+      (groups[row.nome_progetto] ||= []).push(row);
+    }
+
+    progettiEsistenti.innerHTML = Object.keys(groups).map(n=>`<option value="${escapeHtml(n)}">`).join('');
+
+    projectsList.innerHTML = Object.entries(groups).map(([nome, versioni])=>`
+      <div class="project-group">
+        <h3>${escapeHtml(nome)} <span class="count">${versioni.length} version${versioni.length===1?'e':'i'}</span></h3>
+        <div class="ledger">
+          ${versioni.map(v=>`
+            <div class="ledger-row" data-id="${v.id}" data-path="${escapeHtml(v.storage_path)}">
+              <div class="ledger-main">
+                <span class="ledger-tag mono">${escapeHtml(v.versione)}</span>
+                <span class="ledger-file">${escapeHtml(v.nome_file)}</span>
+                ${v.note ? `<div class="ledger-note">${escapeHtml(v.note)}</div>` : ''}
+                <div class="ledger-date mono">${fmtDate(v.created_at)}</div>
+              </div>
+              <div class="ledger-actions">
+                <button class="icon-btn download-btn">Scarica</button>
+                <button class="icon-btn danger delete-btn">Elimina</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `).join('');
+
+    projectsList.querySelectorAll('.download-btn').forEach(btn=>{
+      btn.addEventListener('click', async (e)=>{
+        const row = e.target.closest('.ledger-row');
+        const path = row.dataset.path;
+        const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, 60);
+        if(error){ alert('Errore: ' + error.message); return; }
+        window.open(data.signedUrl, '_blank');
+      });
+    });
+
+    projectsList.querySelectorAll('.delete-btn').forEach(btn=>{
+      btn.addEventListener('click', async (e)=>{
+        const row = e.target.closest('.ledger-row');
+        const id = row.dataset.id;
+        const path = row.dataset.path;
+        if(!confirm('Eliminare definitivamente questa versione? Non si può annullare.')) return;
+        await supabase.storage.from(BUCKET).remove([path]);
+        const { error } = await supabase.from('progetti_versioni').delete().eq('id', id);
+        if(error){ alert('Errore durante l\'eliminazione: ' + error.message); return; }
+        loadProjects();
+      });
+    });
+  }
+
+  function escapeHtml(str){
+    const d = document.createElement('div');
+    d.textContent = str ?? '';
+    return d.innerHTML;
+  }
+
+  uploadForm.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const nomeProgetto = document.getElementById('nome-progetto').value.trim();
+    const versione = document.getElementById('versione').value.trim();
+    const note = document.getElementById('note').value.trim();
+    const file = document.getElementById('file-input').files[0];
+
+    uploadStatus.style.display='none';
+    uploadStatus.className='';
+
+    if(!file){
+      uploadStatus.textContent = 'Seleziona un file da caricare.';
+      uploadStatus.className='err';
+      uploadStatus.style.display='block';
+      return;
+    }
+
+    uploadBtn.disabled = true;
+    uploadBtn.textContent = 'Caricamento…';
+
+    const safeProject = nomeProgetto.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const storagePath = `${safeProject}/${Date.now()}_${file.name}`;
+
+    const { error: uploadError } = await supabase.storage.from(BUCKET).upload(storagePath, file);
+    if(uploadError){
+      uploadStatus.textContent = 'Errore nel caricamento del file: ' + uploadError.message;
+      uploadStatus.className='err';
+      uploadStatus.style.display='block';
+      uploadBtn.disabled = false;
+      uploadBtn.textContent = 'Carica versione';
+      return;
+    }
+
+    const { error: dbError } = await supabase.from('progetti_versioni').insert({
+      nome_progetto: nomeProgetto,
+      versione: versione,
+      nome_file: file.name,
+      storage_path: storagePath,
+      note: note || null
+    });
+
+    uploadBtn.disabled = false;
+    uploadBtn.textContent = 'Carica versione';
+
+    if(dbError){
+      uploadStatus.textContent = 'Errore nel salvataggio: ' + dbError.message;
+      uploadStatus.className='err';
+      uploadStatus.style.display='block';
+      return;
+    }
+
+    uploadStatus.textContent = 'Versione caricata con successo.';
+    uploadStatus.className='ok';
+    uploadStatus.style.display='block';
+    uploadForm.reset();
+    loadProjects();
+  });
+</script>
+
+</body>
+</html>
