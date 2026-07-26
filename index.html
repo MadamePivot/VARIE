@@ -173,7 +173,28 @@
   #upload-status.err{color:var(--danger);}
 
   /* ledger / register list */
+  .launcher-row{display:flex;gap:10px;align-items:stretch;}
+  .launcher-row select{margin-bottom:0;flex:1;}
+  .launcher-hint{font-size:12px;color:var(--ink-soft);margin:10px 0 0;}
+
   .project-group{margin-bottom:26px;}
+  .project-group-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+  }
+  .rename-btn{
+    background:transparent;
+    border:none;
+    color:var(--ink-soft);
+    font-size:12px;
+    font-weight:500;
+    text-decoration:underline;
+    cursor:pointer;
+    padding:2px 4px;
+  }
+  .rename-btn:hover{color:var(--teal-dark);}
   .project-group h3{
     font-size:16px;
     margin:0 0 10px;
@@ -281,9 +302,12 @@
       <form id="upload-form">
         <div class="upload-grid">
           <div>
-            <label for="nome-progetto">Nome progetto</label>
-            <input type="text" id="nome-progetto" list="progetti-esistenti" placeholder="es. gestione-magazzino" required>
-            <datalist id="progetti-esistenti"></datalist>
+            <label for="nome-progetto-select">Progetto</label>
+            <select id="nome-progetto-select">
+              <option value="">Seleziona un progetto…</option>
+              <option value="__nuovo__">➕ Nuovo progetto…</option>
+            </select>
+            <input type="text" id="nome-progetto" placeholder="Nome del nuovo progetto" style="display:none;">
           </div>
           <div>
             <label for="versione">Versione</label>
@@ -303,7 +327,18 @@
     </div>
 
     <div class="panel">
-      <h2>I tuoi progetti</h2>
+      <h2>Usa i tuoi progetti</h2>
+      <div class="launcher-row">
+        <select id="launcher-select">
+          <option value="">Seleziona un progetto…</option>
+        </select>
+        <button id="launcher-open-btn" class="btn-primary" style="width:auto;">Apri</button>
+      </div>
+      <p class="launcher-hint">Apre l'ultima versione caricata di quel progetto.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Archivio versioni</h2>
       <div id="projects-list"></div>
       <div id="empty-state" style="display:none;">Nessun progetto ancora caricato. Usa il modulo sopra per iniziare.</div>
     </div>
@@ -330,6 +365,37 @@
   const projectsList = document.getElementById('projects-list');
   const emptyState = document.getElementById('empty-state');
   const progettiEsistenti = document.getElementById('progetti-esistenti');
+  const nomeProgettoSelect = document.getElementById('nome-progetto-select');
+  const nomeProgettoInput = document.getElementById('nome-progetto');
+  const launcherSelect = document.getElementById('launcher-select');
+  const launcherOpenBtn = document.getElementById('launcher-open-btn');
+
+  nomeProgettoSelect.addEventListener('change', ()=>{
+    if(nomeProgettoSelect.value === '__nuovo__'){
+      nomeProgettoInput.style.display = 'block';
+      nomeProgettoInput.required = true;
+      nomeProgettoInput.value = '';
+      nomeProgettoInput.focus();
+    } else {
+      nomeProgettoInput.style.display = 'none';
+      nomeProgettoInput.required = false;
+      nomeProgettoInput.value = nomeProgettoSelect.value;
+    }
+  });
+
+  async function openFile(path){
+    const { data, error } = await supabase.storage.from(BUCKET).download(path);
+    if(error){ alert('Errore: ' + error.message); return; }
+    const blob = new Blob([data], { type: 'text/html' });
+    const blobUrl = URL.createObjectURL(blob);
+    window.open(blobUrl, '_blank');
+  }
+
+  launcherOpenBtn.addEventListener('click', ()=>{
+    const path = launcherSelect.value;
+    if(!path) return;
+    openFile(path);
+  });
 
   function showApp(){ loginScreen.style.display='none'; appScreen.style.display='block'; loadProjects(); }
   function showLogin(){ loginScreen.style.display='flex'; appScreen.style.display='none'; }
@@ -379,7 +445,8 @@
       projectsList.innerHTML='';
       emptyState.style.display='block';
       emptyState.textContent = 'Nessun progetto ancora caricato. Usa il modulo sopra per iniziare.';
-      progettiEsistenti.innerHTML = '';
+      progettiEsistenti && (progettiEsistenti.innerHTML = '');
+      nomeProgettoSelect.innerHTML = '<option value="">Seleziona un progetto…</option><option value="__nuovo__">➕ Nuovo progetto…</option>';
       return;
     }
     emptyState.style.display='none';
@@ -389,11 +456,22 @@
       (groups[row.nome_progetto] ||= []).push(row);
     }
 
-    progettiEsistenti.innerHTML = Object.keys(groups).map(n=>`<option value="${escapeHtml(n)}">`).join('');
+    nomeProgettoSelect.innerHTML = '<option value="">Seleziona un progetto…</option>' +
+      Object.keys(groups).map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('') +
+      '<option value="__nuovo__">➕ Nuovo progetto…</option>';
+
+    // versioni gia' ordinate per data decrescente (query principale), quindi versioni[0] e' la piu' recente
+    launcherSelect.innerHTML = '<option value="">Seleziona un progetto…</option>' +
+      Object.entries(groups).map(([nome, versioni])=>
+        `<option value="${escapeHtml(versioni[0].storage_path)}">${escapeHtml(nome)} (${escapeHtml(versioni[0].versione)})</option>`
+      ).join('');
 
     projectsList.innerHTML = Object.entries(groups).map(([nome, versioni])=>`
-      <div class="project-group">
-        <h3>${escapeHtml(nome)} <span class="count">${versioni.length} version${versioni.length===1?'e':'i'}</span></h3>
+      <div class="project-group" data-nome="${escapeHtml(nome)}">
+        <div class="project-group-header">
+          <h3>${escapeHtml(nome)} <span class="count">${versioni.length} version${versioni.length===1?'e':'i'}</span></h3>
+          <button class="rename-btn">Rinomina</button>
+        </div>
         <div class="ledger">
           ${versioni.map(v=>`
             <div class="ledger-row" data-id="${v.id}" data-path="${escapeHtml(v.storage_path)}">
@@ -404,7 +482,7 @@
                 <div class="ledger-date mono">${fmtDate(v.created_at)}</div>
               </div>
               <div class="ledger-actions">
-                <button class="icon-btn download-btn">Scarica</button>
+                <button class="icon-btn download-btn">Apri progetto</button>
                 <button class="icon-btn danger delete-btn">Elimina</button>
               </div>
             </div>
@@ -413,13 +491,25 @@
       </div>
     `).join('');
 
-    projectsList.querySelectorAll('.download-btn').forEach(btn=>{
+    projectsList.querySelectorAll('.rename-btn').forEach(btn=>{
       btn.addEventListener('click', async (e)=>{
+        const group = e.target.closest('.project-group');
+        const nomeAttuale = group.dataset.nome;
+        const nuovoNome = prompt('Nuovo nome per il progetto:', nomeAttuale);
+        if(!nuovoNome || nuovoNome.trim() === '' || nuovoNome.trim() === nomeAttuale) return;
+        const { error } = await supabase
+          .from('progetti_versioni')
+          .update({ nome_progetto: nuovoNome.trim() })
+          .eq('nome_progetto', nomeAttuale);
+        if(error){ alert('Errore durante la rinomina: ' + error.message); return; }
+        loadProjects();
+      });
+    });
+
+    projectsList.querySelectorAll('.download-btn').forEach(btn=>{
+      btn.addEventListener('click', (e)=>{
         const row = e.target.closest('.ledger-row');
-        const path = row.dataset.path;
-        const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, 60);
-        if(error){ alert('Errore: ' + error.message); return; }
-        window.open(data.signedUrl, '_blank');
+        openFile(row.dataset.path);
       });
     });
 
@@ -453,6 +543,12 @@
     uploadStatus.style.display='none';
     uploadStatus.className='';
 
+    if(!nomeProgetto){
+      uploadStatus.textContent = 'Scegli un progetto o inserisci il nome del nuovo progetto.';
+      uploadStatus.className='err';
+      uploadStatus.style.display='block';
+      return;
+    }
     if(!file){
       uploadStatus.textContent = 'Seleziona un file da caricare.';
       uploadStatus.className='err';
@@ -466,7 +562,9 @@
     const safeProject = nomeProgetto.replace(/[^a-zA-Z0-9_-]/g, '_');
     const storagePath = `${safeProject}/${Date.now()}_${file.name}`;
 
-    const { error: uploadError } = await supabase.storage.from(BUCKET).upload(storagePath, file);
+    const { error: uploadError } = await supabase.storage.from(BUCKET).upload(storagePath, file, {
+      contentType: file.type || 'text/html'
+    });
     if(uploadError){
       uploadStatus.textContent = 'Errore nel caricamento del file: ' + uploadError.message;
       uploadStatus.className='err';
@@ -498,6 +596,8 @@
     uploadStatus.className='ok';
     uploadStatus.style.display='block';
     uploadForm.reset();
+    nomeProgettoInput.style.display = 'none';
+    nomeProgettoInput.required = false;
     loadProjects();
   });
 </script>
