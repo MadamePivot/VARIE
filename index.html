@@ -391,6 +391,20 @@
     window.open(blobUrl, '_blank');
   }
 
+  async function downloadFile(path, filename){
+    const { data, error } = await supabase.storage.from(BUCKET).download(path);
+    if(error){ alert('Errore: ' + error.message); return; }
+    const blob = new Blob([data], { type: 'application/octet-stream' });
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename || 'progetto.html';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
+  }
+
   launcherOpenBtn.addEventListener('click', ()=>{
     const path = launcherSelect.value;
     if(!path) return;
@@ -474,7 +488,7 @@
         </div>
         <div class="ledger">
           ${versioni.map(v=>`
-            <div class="ledger-row" data-id="${v.id}" data-path="${escapeHtml(v.storage_path)}">
+            <div class="ledger-row" data-id="${v.id}" data-path="${escapeHtml(v.storage_path)}" data-filename="${escapeHtml(v.nome_file)}">
               <div class="ledger-main">
                 <span class="ledger-tag mono">${escapeHtml(v.versione)}</span>
                 <span class="ledger-file">${escapeHtml(v.nome_file)}</span>
@@ -483,6 +497,7 @@
               </div>
               <div class="ledger-actions">
                 <button class="icon-btn download-btn">Apri progetto</button>
+                <button class="icon-btn scarica-btn">Scarica</button>
                 <button class="icon-btn danger delete-btn">Elimina</button>
               </div>
             </div>
@@ -510,6 +525,13 @@
       btn.addEventListener('click', (e)=>{
         const row = e.target.closest('.ledger-row');
         openFile(row.dataset.path);
+      });
+    });
+
+    projectsList.querySelectorAll('.scarica-btn').forEach(btn=>{
+      btn.addEventListener('click', (e)=>{
+        const row = e.target.closest('.ledger-row');
+        downloadFile(row.dataset.path, row.dataset.filename);
       });
     });
 
