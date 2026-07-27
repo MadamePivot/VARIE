@@ -172,9 +172,41 @@
   #upload-status.ok{color:var(--teal-dark);}
   #upload-status.err{color:var(--danger);}
 
-  /* ledger / register list */
-  .launcher-row{display:flex;gap:10px;align-items:stretch;}
-  .launcher-row select{margin-bottom:0;flex:1;}
+  /* pannello "Programmi" (tasti di lancio, divisi per categoria) */
+  .program-section{margin-bottom:8px;}
+  .program-section-title{
+    font-size:12px;
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+    color:var(--ink-soft);
+    margin:0 0 10px;
+    font-weight:600;
+  }
+  .program-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(180px,1fr));
+    gap:10px;
+    margin-bottom:8px;
+  }
+  .program-btn{
+    background:var(--paper-dim);
+    border:1px solid var(--line);
+    border-radius:4px;
+    padding:14px 12px;
+    font-size:14px;
+    font-weight:600;
+    color:var(--ink);
+    text-align:left;
+    cursor:pointer;
+    transition:border-color .15s, color .15s, background .15s;
+  }
+  .program-btn:hover{border-color:var(--teal); color:var(--teal-dark); background:#fff;}
+  .program-empty{
+    font-size:13px;
+    color:var(--ink-soft);
+    font-style:italic;
+    margin:0 0 20px;
+  }
   .launcher-hint{font-size:12px;color:var(--ink-soft);margin:10px 0 0;}
 
   .project-group{margin-bottom:26px;}
@@ -184,6 +216,7 @@
     justify-content:space-between;
     gap:8px;
   }
+  .project-group-actions{display:flex;gap:6px;flex-shrink:0;}
   .rename-btn{
     background:transparent;
     border:none;
@@ -193,8 +226,16 @@
     text-decoration:underline;
     cursor:pointer;
     padding:2px 4px;
+    white-space:nowrap;
   }
   .rename-btn:hover{color:var(--teal-dark);}
+  .category-select-inline{
+    width:auto;
+    display:inline-block;
+    margin-bottom:0;
+    padding:4px 8px;
+    font-size:12px;
+  }
   .project-group h3{
     font-size:16px;
     margin:0 0 10px;
@@ -202,6 +243,7 @@
     display:flex;
     align-items:center;
     gap:8px;
+    flex-wrap:wrap;
   }
   .project-group h3 .count{
     font-family:'IBM Plex Mono',monospace;
@@ -308,6 +350,15 @@
               <option value="__nuovo__">➕ Nuovo progetto…</option>
             </select>
             <input type="text" id="nome-progetto" placeholder="Nome del nuovo progetto" style="display:none;">
+            <div id="categoria-wrap" style="display:none;">
+              <label for="categoria-select">Categoria</label>
+              <select id="categoria-select">
+                <option value="Madame Pivot">Madame Pivot</option>
+                <option value="MP Spazio Lab">MP Spazio Lab</option>
+                <option value="Generico">Generico</option>
+                <option value="Personale">Personale</option>
+              </select>
+            </div>
           </div>
           <div>
             <label for="versione">Versione</label>
@@ -327,14 +378,28 @@
     </div>
 
     <div class="panel">
-      <h2>Usa i tuoi progetti</h2>
-      <div class="launcher-row">
-        <select id="launcher-select">
-          <option value="">Seleziona un progetto…</option>
-        </select>
-        <button id="launcher-open-btn" class="btn-primary" style="width:auto;">Apri</button>
+      <h2>Programmi</h2>
+      <div class="program-section">
+        <h3 class="program-section-title">Madame Pivot</h3>
+        <div id="programs-madamepivot" class="program-grid"></div>
+        <p id="programs-madamepivot-empty" class="program-empty" style="display:none;">Nessun programma ancora.</p>
       </div>
-      <p class="launcher-hint">Apre l'ultima versione caricata di quel progetto.</p>
+      <div class="program-section">
+        <h3 class="program-section-title">MP Spazio Lab</h3>
+        <div id="programs-mpspaziolab" class="program-grid"></div>
+        <p id="programs-mpspaziolab-empty" class="program-empty" style="display:none;">Nessun programma ancora.</p>
+      </div>
+      <div class="program-section">
+        <h3 class="program-section-title">Generici</h3>
+        <div id="programs-generico" class="program-grid"></div>
+        <p id="programs-generico-empty" class="program-empty" style="display:none;">Nessun programma ancora.</p>
+      </div>
+      <div class="program-section">
+        <h3 class="program-section-title">Personali</h3>
+        <div id="programs-personale" class="program-grid"></div>
+        <p id="programs-personale-empty" class="program-empty" style="display:none;">Nessun programma ancora.</p>
+      </div>
+      <p class="launcher-hint">Ogni tasto apre l'ultima versione caricata di quel programma.</p>
     </div>
 
     <div class="panel">
@@ -364,11 +429,23 @@
   const uploadStatus = document.getElementById('upload-status');
   const projectsList = document.getElementById('projects-list');
   const emptyState = document.getElementById('empty-state');
-  const progettiEsistenti = document.getElementById('progetti-esistenti');
   const nomeProgettoSelect = document.getElementById('nome-progetto-select');
   const nomeProgettoInput = document.getElementById('nome-progetto');
-  const launcherSelect = document.getElementById('launcher-select');
-  const launcherOpenBtn = document.getElementById('launcher-open-btn');
+  const categoriaWrap = document.getElementById('categoria-wrap');
+  const categoriaSelect = document.getElementById('categoria-select');
+  // categorie disponibili, in ordine di visualizzazione
+  const CATEGORIE = ['Madame Pivot', 'MP Spazio Lab', 'Generico', 'Personale'];
+  const CATEGORIA_SLUG = { 'Madame Pivot':'madamepivot', 'MP Spazio Lab':'mpspaziolab', 'Generico':'generico', 'Personale':'personale' };
+  const programGrids = {};
+  const programEmpties = {};
+  for(const cat of CATEGORIE){
+    const slug = CATEGORIA_SLUG[cat];
+    programGrids[cat] = document.getElementById('programs-' + slug);
+    programEmpties[cat] = document.getElementById('programs-' + slug + '-empty');
+  }
+
+  // memorizza l'ultima categoria conosciuta per ogni progetto (aggiornata da loadProjects)
+  let categoriaPerProgetto = {};
 
   nomeProgettoSelect.addEventListener('change', ()=>{
     if(nomeProgettoSelect.value === '__nuovo__'){
@@ -376,10 +453,13 @@
       nomeProgettoInput.required = true;
       nomeProgettoInput.value = '';
       nomeProgettoInput.focus();
+      categoriaWrap.style.display = 'block';
+      categoriaSelect.value = 'Generico';
     } else {
       nomeProgettoInput.style.display = 'none';
       nomeProgettoInput.required = false;
       nomeProgettoInput.value = nomeProgettoSelect.value;
+      categoriaWrap.style.display = 'none';
     }
   });
 
@@ -404,12 +484,6 @@
     document.body.removeChild(a);
     URL.revokeObjectURL(blobUrl);
   }
-
-  launcherOpenBtn.addEventListener('click', ()=>{
-    const path = launcherSelect.value;
-    if(!path) return;
-    openFile(path);
-  });
 
   function showApp(){ loginScreen.style.display='none'; appScreen.style.display='block'; loadProjects(); }
   function showLogin(){ loginScreen.style.display='flex'; appScreen.style.display='none'; }
@@ -459,8 +533,12 @@
       projectsList.innerHTML='';
       emptyState.style.display='block';
       emptyState.textContent = 'Nessun progetto ancora caricato. Usa il modulo sopra per iniziare.';
-      progettiEsistenti && (progettiEsistenti.innerHTML = '');
       nomeProgettoSelect.innerHTML = '<option value="">Seleziona un progetto…</option><option value="__nuovo__">➕ Nuovo progetto…</option>';
+      for(const cat of CATEGORIE){
+        programGrids[cat].innerHTML = '';
+        programEmpties[cat].style.display = 'block';
+      }
+      categoriaPerProgetto = {};
       return;
     }
     emptyState.style.display='none';
@@ -470,21 +548,42 @@
       (groups[row.nome_progetto] ||= []).push(row);
     }
 
+    // versioni gia' ordinate per data decrescente (query principale), quindi versioni[0] e' la piu' recente
+    categoriaPerProgetto = {};
+    for(const [nome, versioni] of Object.entries(groups)){
+      categoriaPerProgetto[nome] = versioni[0].categoria || 'Generico';
+    }
+
     nomeProgettoSelect.innerHTML = '<option value="">Seleziona un progetto…</option>' +
       Object.keys(groups).map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('') +
       '<option value="__nuovo__">➕ Nuovo progetto…</option>';
 
-    // versioni gia' ordinate per data decrescente (query principale), quindi versioni[0] e' la piu' recente
-    launcherSelect.innerHTML = '<option value="">Seleziona un progetto…</option>' +
-      Object.entries(groups).map(([nome, versioni])=>
-        `<option value="${escapeHtml(versioni[0].storage_path)}">${escapeHtml(nome)} (${escapeHtml(versioni[0].versione)})</option>`
+    // ---- pannello "Programmi": tasti divisi per categoria ----
+    for(const cat of CATEGORIE){
+      const progettiCategoria = Object.entries(groups).filter(([,versioni])=>(versioni[0].categoria || 'Generico') === cat);
+      programGrids[cat].innerHTML = progettiCategoria.map(([nome, versioni])=>
+        `<button type="button" class="program-btn" data-path="${escapeHtml(versioni[0].storage_path)}">${escapeHtml(nome)}</button>`
       ).join('');
+      programEmpties[cat].style.display = progettiCategoria.length ? 'none' : 'block';
+      programGrids[cat].querySelectorAll('.program-btn').forEach(btn=>{
+        btn.addEventListener('click', ()=> openFile(btn.dataset.path));
+      });
+    }
 
-    projectsList.innerHTML = Object.entries(groups).map(([nome, versioni])=>`
+    // ---- pannello "Archivio versioni" ----
+    projectsList.innerHTML = Object.entries(groups).map(([nome, versioni])=>{
+      const categoria = versioni[0].categoria || 'Generico';
+      const opzioniCategoria = CATEGORIE.map(c=>
+        `<option value="${escapeHtml(c)}" ${c===categoria ? 'selected' : ''}>${escapeHtml(c)}</option>`
+      ).join('');
+      return `
       <div class="project-group" data-nome="${escapeHtml(nome)}">
         <div class="project-group-header">
           <h3>${escapeHtml(nome)} <span class="count">${versioni.length} version${versioni.length===1?'e':'i'}</span></h3>
-          <button class="rename-btn">Rinomina</button>
+          <div class="project-group-actions">
+            <select class="category-select-inline">${opzioniCategoria}</select>
+            <button class="rename-btn">Rinomina</button>
+          </div>
         </div>
         <div class="ledger">
           ${versioni.map(v=>`
@@ -504,7 +603,7 @@
           `).join('')}
         </div>
       </div>
-    `).join('');
+    `;}).join('');
 
     projectsList.querySelectorAll('.rename-btn').forEach(btn=>{
       btn.addEventListener('click', async (e)=>{
@@ -517,6 +616,20 @@
           .update({ nome_progetto: nuovoNome.trim() })
           .eq('nome_progetto', nomeAttuale);
         if(error){ alert('Errore durante la rinomina: ' + error.message); return; }
+        loadProjects();
+      });
+    });
+
+    projectsList.querySelectorAll('.category-select-inline').forEach(sel=>{
+      sel.addEventListener('change', async (e)=>{
+        const group = e.target.closest('.project-group');
+        const nome = group.dataset.nome;
+        const nuovaCategoria = e.target.value;
+        const { error } = await supabase
+          .from('progetti_versioni')
+          .update({ categoria: nuovaCategoria })
+          .eq('nome_progetto', nome);
+        if(error){ alert('Errore durante il cambio di categoria: ' + error.message); return; }
         loadProjects();
       });
     });
@@ -561,6 +674,8 @@
     const versione = document.getElementById('versione').value.trim();
     const note = document.getElementById('note').value.trim();
     const file = document.getElementById('file-input').files[0];
+    const isNuovoProgetto = nomeProgettoSelect.value === '__nuovo__';
+    const categoria = isNuovoProgetto ? categoriaSelect.value : (categoriaPerProgetto[nomeProgetto] || 'Generico');
 
     uploadStatus.style.display='none';
     uploadStatus.className='';
@@ -601,7 +716,8 @@
       versione: versione,
       nome_file: file.name,
       storage_path: storagePath,
-      note: note || null
+      note: note || null,
+      categoria: categoria
     });
 
     uploadBtn.disabled = false;
@@ -620,6 +736,7 @@
     uploadForm.reset();
     nomeProgettoInput.style.display = 'none';
     nomeProgettoInput.required = false;
+    categoriaWrap.style.display = 'none';
     loadProjects();
   });
 </script>
