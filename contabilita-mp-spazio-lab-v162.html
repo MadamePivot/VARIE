@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 161</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 162</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -2990,11 +2990,17 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
         }).join(' · ')) : '';
       }
       const combacia = checcatiFatt.length >= 1 && Math.abs(tot - movimentoImporto) < 0.02;
+      // un totale che supera il movimento non e' mai corretto (allocherebbe piu' soldi di quanti il
+      // movimento ne contenga davvero): va bloccato, non solo segnalato - stessa protezione gia'
+      // presente in apriModaleCollegaPagamento (vedi il commento li' sul caso Schmid), mancava qui e
+      // ha permesso di salvare per sbaglio un doppio collegamento sovrapposto (fattura 10 e 11 insieme
+      // sopra un bonifico da 2000, proposte rispettivamente 806 e 2000 per un totale di 2806)
+      const sovrapagato = checcatiFatt.length >= 1 && tot - movimentoImporto > 0.02;
       const avviso = checcati.length >= 1 && !combacia;
       if (totEl) {
         totEl.textContent = `€ ${fmtEUR(tot)}`;
-        totEl.style.color = combacia ? '#fff' : (avviso ? '#000' : '');
-        totEl.style.background = combacia ? 'var(--green)' : (avviso ? '#f5c453' : '');
+        totEl.style.color = combacia ? '#fff' : (sovrapagato ? '#fff' : (avviso ? '#000' : ''));
+        totEl.style.background = combacia ? 'var(--green)' : (sovrapagato ? 'var(--red)' : (avviso ? '#f5c453' : ''));
         totEl.style.padding = (combacia || avviso) ? '2px 8px' : '';
         totEl.style.borderRadius = (combacia || avviso) ? '4px' : '';
       }
@@ -3006,11 +3012,11 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
           const diff = movimentoImporto - tot;
           msg = diff > 0
             ? `Con questi importi ${checcatiFatt.length > 1 ? 'le fatture selezionate restano' : 'la fattura selezionata resta'} aperta per altri € ${fmtEUR(diff)} - controlla se manca da selezionare un'altra fattura (o nota di credito) di questo importo.`
-            : `Attenzione: gli importi indicati (€ ${fmtEUR(tot)}) superano di € ${fmtEUR(-diff)} l'importo del movimento (€ ${fmtEUR(movimentoImporto)}) - controlla se manca da spuntare una nota di credito di questo importo.`;
+            : `Gli importi indicati (€ ${fmtEUR(tot)}) superano di € ${fmtEUR(-diff)} l'importo del movimento (€ ${fmtEUR(movimentoImporto)}): correggi gli importi delle righe selezionate prima di collegare.`;
         }
         avvisoEl.textContent = msg;
       }
-      if (btnMulti) btnMulti.disabled = checcatiFatt.length < 1;
+      if (btnMulti) btnMulti.disabled = checcatiFatt.length < 1 || sovrapagato;
       // l'avviso puo' far crescere di una riga la barra: gli sticky sotto vanno rimisurati per non finirci sopra
       posizionaStickyCollega();
     }
