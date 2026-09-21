@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 158</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 159</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -2908,13 +2908,15 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
     function inputImportoDi(checkId) {
       return content.querySelector(`.collega-importo-input[data-for-id="${checkId}"]`);
     }
-    // Il valore proposto per una fattura appena spuntata e' sempre il suo pieno residuo, mai ridotto
-    // in automatico per "starci dentro" al movimento: se il movimento vale meno del residuo, e' perche'
-    // manca una nota di credito da spuntare insieme (l'avviso in aggiornaBarraMultipla lo segnala), non
-    // perche' la fattura vada silenziosamente scontata - un valore ridotto senza spiegazione e' esattamente
-    // cio' che confondeva l'utente (vedeva "883,69" invece dei veri "889,79" della fattura). Il valore si
-    // "fissa" (flag editedByUser) appena proposto, cosi' spuntarne un'altra dopo non lo tocca piu'.
+    // Il valore proposto per una fattura appena spuntata e' il suo residuo, ma capato a quanto resta
+    // ancora libero del movimento (movimento meno le fatture/NC gia' spuntate prima, in ordine): utile
+    // per pagare piu' fatture in sequenza con un unico bonifico (es. criterio FIFO, prima la piu'
+    // vecchia) senza dover ricalcolare a mano quanto avanza per la successiva. Resta comunque
+    // modificabile: se il valore proposto non e' quello giusto lo si corregge subito a vista, non
+    // sparisce nulla. Il valore si "fissa" (flag editedByUser) appena proposto, cosi' spuntarne
+    // un'altra dopo non lo tocca piu' retroattivamente.
     function ricalcolaDefaultImporti() {
+      let residuoMovimento = movimentoImporto;
       for (const chk of content.querySelectorAll('.collega-check')) {
         const input = inputImportoDi(chk.dataset.checkId);
         if (!input) continue;
@@ -2924,10 +2926,16 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
           continue;
         }
         input.disabled = false;
-        if (chk.dataset.checkNc === '1' || input.dataset.editedByUser === '1') continue;
+        const segno = chk.dataset.checkNc === '1' ? -1 : 1;
+        if (chk.dataset.checkNc === '1' || input.dataset.editedByUser === '1') {
+          residuoMovimento -= segno * (Number(input.value) || 0);
+          continue;
+        }
         const residuo = Number(chk.dataset.checkImportoRaw) || 0;
-        input.value = residuo.toFixed(2);
+        const proposto = residuoMovimento > 0 ? Math.min(residuo, residuoMovimento) : residuo;
+        input.value = proposto.toFixed(2);
         input.dataset.editedByUser = '1';
+        residuoMovimento -= proposto;
       }
     }
     function aggiornaBarraMultipla() {
