@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 155</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 156</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -864,6 +864,7 @@ const NAV = [
   { group: 'Banca', items: [
     { id: 'movimenti', label: 'Movimenti Bancari' },
     { id: 'carta', label: 'Movimenti Carta' },
+    { id: 'accontiInAttesa', label: 'Acconti in attesa' },
     // sottomenu con una voce per banca e una per carta di credito (vedi caricaVociEstrattiSidebar):
     // tutte puntano alla stessa tab, che si filtra sulla voce scelta invece di avere una sezione per
     // ciascuna banca/carta (l'elenco cambia nel tempo, non ha senso hardcodarlo qui)
