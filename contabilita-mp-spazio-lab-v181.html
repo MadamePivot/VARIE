@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 180</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 181</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -2576,6 +2576,34 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
     return (link || []).map(l => ({ ...l, fattura: fatt[l.fattura_id] })).filter(l => l.fattura);
   }
 
+  // debito residuo ereditato dalla ditta individuale al conferimento in SRL (04/05/2021): un
+  // fornitore puo' avere un residuo di apertura ancora da saldare oltre (o invece di) fatture vere.
+  // Prima andava segnato a parte scrivendo la P.IVA a mano in un mini-form separato: l'utente lo
+  // trovava scomodo e non voleva doversi ricordare quali fornitori hanno un'apertura ("secondo te io
+  // devo sapere se uno ha i saldi iniziali??") - ora il residuo compare come una riga in piu' nella
+  // stessa ricerca, spuntabile come una fattura qualunque (vedi eseguiRicerca/renderModale).
+  const DATA_CONFERIMENTO_APERTURA = '2021-05-04';
+  let residuiApertura = [];
+  async function caricaResiduiApertura() {
+    const [{ data: saldi }, { data: pagamenti }] = await Promise.all([
+      fetchTutteLeRighe(() => supabase.from('saldi_apertura_fornitori').select('fornitore_piva,fornitore_denominazione,importo').in('azienda', AZIENDE_LETTURA)),
+      fetchTutteLeRighe(() => supabase.from('pagamenti_apertura_fornitori').select('fornitore_piva,importo').in('azienda', AZIENDE_LETTURA)),
+    ]);
+    const perFornitore = new Map();
+    for (const s of (saldi || [])) {
+      if (!s.fornitore_piva) continue;
+      if (!perFornitore.has(s.fornitore_piva)) perFornitore.set(s.fornitore_piva, { nome: s.fornitore_denominazione || s.fornitore_piva, residuo: 0 });
+      perFornitore.get(s.fornitore_piva).residuo += Number(s.importo) || 0;
+    }
+    for (const p of (pagamenti || [])) {
+      if (!p.fornitore_piva || !perFornitore.has(p.fornitore_piva)) continue;
+      perFornitore.get(p.fornitore_piva).residuo -= Number(p.importo) || 0;
+    }
+    residuiApertura = [...perFornitore.entries()]
+      .map(([piva, v]) => ({ piva, nome: v.nome, residuo: v.residuo }))
+      .filter(r => r.residuo > 0.02);
+  }
+
   // vedi il commento sopra alla chiamata in renderModale: tre sticky impilati, ognuno posizionato
   // in base all'altezza reale di quello sopra (misurata dopo il render, mai fissa)
   function posizionaStickyCollega() {
@@ -2634,21 +2662,6 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
 
   function renderModale(risultati, linkAttuali) {
     if (meGen !== modaleCollegaGen) return;
-    // per "Segna come pagamento su apertura conferimento": la P.IVA si propone da sola quando i
-    // risultati di ricerca puntano tutti a un unico fornitore, ma resta sempre scrivibile a mano nel
-    // campo del form - trovato un caso reale (Due A) dove il rilevamento automatico falliva
-    // (probabile P.IVA salvata in formato incoerente tra fatture vecchie e nuove), quindi non ci si
-    // affida piu' solo a quello: si vede "Clienti e Fornitori" per la P.IVA esatta da incollare.
-    const pivaAperturaTrovate = [...new Set((risultati || []).map(f => f.fornitore_piva).filter(Boolean))];
-    const pivaAperturaProposta = pivaAperturaTrovate.length === 1 ? pivaAperturaTrovate[0] : '';
-    const nomeAperturaProposto = pivaAperturaProposta
-      ? ((risultati.find(f => f.fornitore_piva === pivaAperturaProposta) || {}).fornitore_denominazione || '')
-      : (termineIniziale || '');
-    // quanto e' gia' allocato su fatture vere: serve per proporre solo il residuo all'apertura, non
-    // l'intero movimento - caso reale Due A, 20/12/2021: 282,80 di cui 190,32 sulla fattura 3556 e
-    // solo i restanti 92,48 sul saldo di apertura (confermato dal mastrino Mexal originale)
-    const giaAllocatoApertura = (linkAttuali || []).reduce((s, l) => s + (l.importo_allocato != null ? Number(l.importo_allocato) : Number(l.fattura.importo_totale) || 0), 0);
-    const residuoApertura = Math.max(0, movimentoImporto - giaAllocatoApertura);
     content.innerHTML = `
       <div id="collegaStickyTop" style="position:sticky; top:0; z-index:5; background:var(--card); padding-bottom:6px;">
       <h2>Collega a una o piu' fatture o notule</h2>
@@ -2663,20 +2676,6 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
           </div>
           <p class="muted" style="margin:0; font-size:11px;">Seleziona il conto transitorio (es. "Acconti a fornitori" o "Acconti da clienti"): il movimento viene registrato subito su quel conto, cosi' compare nel suo mastrino, invece di restare senza categoria in attesa della fattura. Quando la fattura arriva, usa "Collega" su questo stesso movimento: il conto assegnato qui viene tolto automaticamente e sostituito dal collegamento alla fattura.</p>
           <div id="segnaAccontoStatus" style="font-size:12px; margin-top:4px;"></div>
-        </div>
-      </div>
-      <div style="margin:6px 0 10px;">
-        <a href="#" id="segnaAperturaToggle" style="font-size:12px;">Segna come pagamento su saldo di apertura conferimento</a>
-        <div id="segnaAperturaForm" style="display:none; margin-top:6px; padding:8px; background:var(--bg-soft,#f4f4f2); border-radius:6px;">
-          <div style="display:flex; gap:8px; margin-bottom:6px; flex-wrap:wrap; align-items:center;">
-            <input type="text" id="segnaAperturaPiva" value="${pivaAperturaProposta.replace(/"/g, '&quot;')}" placeholder="P.IVA/CF fornitore" style="width:160px; padding:6px;" title="Precompilata se la ricerca punta a un unico fornitore, ma scrivibile a mano: copiala da 'Clienti e Fornitori' se non e' corretta o resta vuota">
-            <input type="text" id="segnaAperturaNomeFornitore" value="${nomeAperturaProposto.replace(/"/g, '&quot;')}" placeholder="Nome fornitore (per la nota)" style="min-width:160px; padding:6px;">
-            <input type="number" step="0.01" id="segnaAperturaImporto" value="${residuoApertura.toFixed(2)}" style="width:100px; padding:6px;" title="Importo da destinare al saldo di apertura: modificabile, di default e' quanto resta del movimento dopo eventuali fatture gia' collegate">
-            <input type="text" id="segnaAperturaNota" placeholder="Nota (facoltativa)" style="flex:1; min-width:160px; padding:6px;">
-            <button type="button" class="btn secondary" id="segnaAperturaConferma">Conferma</button>
-          </div>
-          <p class="muted" style="margin:0; font-size:11px;">Per il debito ereditato dalla ditta individuale al momento del conferimento in SRL (04/05/2021), non collegato a nessuna fattura vera. La P.IVA si propone da sola solo se la ricerca qui sopra punta a un unico fornitore: se resta vuota o e' sbagliata, vai su "Clienti e Fornitori", copia la P.IVA/CF esatta e incollala qui. L'importo proposto e' quanto resta del movimento (€ ${fmtEUR(movimentoImporto)}) al netto delle fatture gia' collegate o spuntate qui sopra${giaAllocatoApertura > 0.02 ? ` (€ ${fmtEUR(giaAllocatoApertura)} gia' allocati)` : ''}: si aggiorna da solo se spunti una fattura sopra, ma resta modificabile a mano se serve dividere diversamente. Il movimento risulta riconciliato solo se la somma tra fatture collegate e apertura copre l'intero importo.</p>
-          <div id="segnaAperturaStatus" style="font-size:12px; margin-top:4px;"></div>
         </div>
       </div>
       ${linkAttuali.length ? `
@@ -2800,19 +2799,19 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
                 return `
                 <tr ${(pagataDelTutto || notaCredito) ? 'style="opacity:0.55;"' : ''}>
                   <td style="white-space:nowrap;">
-                    <input type="checkbox" class="collega-check" data-check-id="${f.id}" data-check-tipo="${f._tipo || 'acquisto'}" data-check-nc="${notaCredito ? '1' : '0'}" data-check-importo-raw="${notaCredito ? -Math.abs(Number(f.importo_totale) || 0) : importoDaAllocare}" data-check-numero-vis="${(f.numero || '').replace(/"/g, '&quot;')}" ${selezionati.has(f.id) ? 'checked' : ''}>
+                    <input type="checkbox" class="collega-check" data-check-id="${f.id}" data-check-tipo="${f._tipo || 'acquisto'}" data-check-nc="${notaCredito ? '1' : '0'}" data-check-importo-raw="${notaCredito ? -Math.abs(Number(f.importo_totale) || 0) : importoDaAllocare}" data-check-numero-vis="${(f.numero || '').replace(/"/g, '&quot;')}" data-check-fornitore="${(f.fornitore_denominazione || '').replace(/"/g, '&quot;')}" ${selezionati.has(f.id) ? 'checked' : ''}>
                     <input type="number" step="0.01" class="collega-importo-input${notaCredito ? ' collega-importo-nc' : ''}" data-for-id="${f.id}" value="${(notaCredito ? Math.abs(Number(f.importo_totale) || 0) : importoDaAllocare).toFixed(2)}" ${selezionati.has(f.id) ? '' : 'disabled'} title="${notaCredito ? 'Importo di questa nota di credito da usare per compensare le fatture selezionate: modificabile per un uso parziale' : 'Importo di questo movimento da allocare su questa fattura: modificabile, per dividere un pagamento su piu\' fatture'}" style="width:70px; font-size:11px; padding:2px 3px; margin-left:4px;">
                   </td>
                   <td>${f.numero}</td>
                   <td>${fmtDate(f.data)}</td>
-                  <td>${f.fornitore_denominazione}${f._tipo === 'notula' ? ' <span class="pill" style="background:#e6e6fa;">Notula</span>' : ''}</td>
+                  <td>${f.fornitore_denominazione}${f._tipo === 'notula' ? ' <span class="pill" style="background:#e6e6fa;">Notula</span>' : ''}${f._tipo === 'apertura' ? ' <span class="pill" style="background:#f0ddb8;" title="Debito ereditato dalla ditta individuale al conferimento in SRL (04/05/2021), non legato a nessuna fattura vera">Apertura conferimento</span>' : ''}</td>
                   <td class="num">${fmtEUR(f.importo_totale)}</td>
                   <td>${notaCredito
                       ? '<span class="pill" style="background:#dce6f5;" title="Seleziona insieme a una o piu\' fatture aperte: il suo importo si sottrae dal totale, cosi\' il movimento puo\' coprire una fattura al netto della nota di credito">Nota di credito</span>'
                       : pagataDelTutto
                       ? `<span class="pill" style="background:#d9ead0;" title="Gia' interamente pagata: € ${fmtEUR(f._pagato)}${pagatoAltroTitle}">&#10003; Gia' pagata</span>`
                       : (f._pagato > 0 ? `<span class="pill" style="background:#fbe8b0;" title="Pagato finora: € ${fmtEUR(f._pagato)}${pagatoAltroTitle}">Parziale, residuo € ${fmtEUR(residuo)}</span>` : '<span class="pill">Aperta</span>')}</td>
-                  <td>${notaCredito ? '' : `<button type="button" class="btn" style="padding:3px 8px; font-size:11px;" data-collega-fattura-id="${f.id}" data-fattura-tipo="${f._tipo || 'acquisto'}" data-fattura-importo="${importoDaAllocare}" data-fattura-gia-pagata="${pagataDelTutto ? '1' : '0'}" data-fattura-numero-vis="${(f.numero || '').replace(/"/g, '&quot;')}">Collega</button>`}</td>
+                  <td>${notaCredito ? '' : `<button type="button" class="btn" style="padding:3px 8px; font-size:11px;" data-collega-fattura-id="${f.id}" data-fattura-tipo="${f._tipo || 'acquisto'}" data-fattura-importo="${importoDaAllocare}" data-fattura-gia-pagata="${pagataDelTutto ? '1' : '0'}" data-fattura-numero-vis="${(f.numero || '').replace(/"/g, '&quot;')}" data-fattura-fornitore="${(f.fornitore_denominazione || '').replace(/"/g, '&quot;')}">Collega</button>`}</td>
                 </tr>`;
               }).join('')}
             </tbody>
@@ -2923,68 +2922,6 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
       if (onSalvato) onSalvato();
       chiudiModaleCollega();
     });
-    const segnaAperturaToggle = document.getElementById('segnaAperturaToggle');
-    if (segnaAperturaToggle) segnaAperturaToggle.addEventListener('click', (e) => {
-      e.preventDefault();
-      const form = document.getElementById('segnaAperturaForm');
-      form.style.display = form.style.display === 'none' ? 'block' : 'none';
-      posizionaStickyCollega();
-    });
-    const segnaAperturaImportoInput = document.getElementById('segnaAperturaImporto');
-    // come per le fatture (vedi editedByUser piu' sotto): appena l'utente tocca a mano l'importo
-    // dell'apertura, il ricalcolo automatico smette di sovrascriverlo
-    if (segnaAperturaImportoInput) segnaAperturaImportoInput.addEventListener('input', () => {
-      segnaAperturaImportoInput.dataset.editedByUser = '1';
-    });
-    const segnaAperturaConferma = document.getElementById('segnaAperturaConferma');
-    if (segnaAperturaConferma) segnaAperturaConferma.addEventListener('click', async () => {
-      if (segnaAperturaConferma.disabled) return;
-      const statusEl = document.getElementById('segnaAperturaStatus');
-      const piva = document.getElementById('segnaAperturaPiva').value.trim();
-      if (!piva) {
-        statusEl.textContent = 'Inserisci la P.IVA/CF del fornitore (copiala da "Clienti e Fornitori" se serve).';
-        statusEl.style.color = '#b00';
-        return;
-      }
-      const nomeFornitore = document.getElementById('segnaAperturaNomeFornitore').value.trim() || piva;
-      const importoApertura = Number(document.getElementById('segnaAperturaImporto').value) || 0;
-      if (importoApertura <= 0) {
-        statusEl.textContent = 'Inserisci un importo maggiore di zero.';
-        statusEl.style.color = '#b00';
-        return;
-      }
-      const nota = document.getElementById('segnaAperturaNota').value.trim();
-      segnaAperturaConferma.disabled = true;
-      // pagamento diviso (caso reale Due A, 20/12/2021: 190,32 sulla fattura 3556 + 92,48 di apertura
-      // = 282,80 del movimento): se qui sopra e' spuntata una fattura non ancora salvata, la si salva
-      // insieme, altrimenti "Conferma" chiuderebbe subito il modale (vedi sotto) perdendo quel
-      // collegamento mai registrato
-      if (content.querySelectorAll('.collega-check:checked').length) await salvaFattureSpuntate();
-      // due scritture separate: la riga sul saldo di apertura (per il Mastrino Fornitori, vedi
-      // pagamenti_apertura_fornitori) e la chiusura del movimento stesso (riconciliato + nota, stesso
-      // meccanismo di "Ditta vecchia"/"Escludi") - solo per l'importo indicato, non necessariamente
-      // tutto il movimento: puo' esserci gia' una fattura vera collegata sopra, quindi "riconciliato"
-      // diventa true solo se fatture collegate + questo importo coprono il totale
-      const { error: errApertura } = await supabase.from('pagamenti_apertura_fornitori').insert({
-        azienda: AZIENDA_SCRITTURA, fornitore_piva: piva,
-        data: movimentoData, importo: importoApertura, nota: nota || null,
-      });
-      if (errApertura) { statusEl.textContent = 'Errore: ' + errApertura.message; statusEl.style.color = '#b00'; segnaAperturaConferma.disabled = false; return; }
-      // il totale allocato su fatture vere puo' essere appena cambiato dal salvataggio qui sopra: si
-      // rilegge invece di fidarsi di giaAllocatoApertura, calcolato all'apertura del modale e ormai
-      // stantio in questo caso
-      const { data: linkOra } = await supabase.from('pagamenti_fatture')
-        .select('importo_allocato').eq('movimento_tabella', tabella).eq('movimento_id', rigaId);
-      const totaleAllocatoFatture = (linkOra || []).reduce((s, l) => s + (Number(l.importo_allocato) || 0), 0);
-      const riconciliatoOra = (totaleAllocatoFatture + importoApertura) >= movimentoImporto - 0.02;
-      const { error: errMov } = await supabase.from(tabella).update({
-        riconciliato: riconciliatoOra, codice_conto: null,
-        nota_acconto: `Acconto su apertura conferimento (${nomeFornitore})${nota ? ' - ' + nota : ''}`,
-      }).eq('id', rigaId);
-      if (errMov) { statusEl.textContent = 'Errore: ' + errMov.message; statusEl.style.color = '#b00'; segnaAperturaConferma.disabled = false; return; }
-      if (onSalvato) onSalvato();
-      chiudiModaleCollega();
-    });
     content.querySelectorAll('[data-scollega-link-id]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const { error } = await supabase.from('pagamenti_fatture').delete().eq('id', btn.dataset.scollegaLinkId);
@@ -3008,6 +2945,21 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
         const giaAllocato = linkAttuali.reduce((s, l) => s + (l.importo_allocato != null ? Number(l.importo_allocato) : movimentoImporto), 0);
         const residuoMovimento = Math.max(0, movimentoImporto - giaAllocato);
         const importoAllocato = Math.min(Number(btn.dataset.fatturaImporto) || 0, residuoMovimento || Number(btn.dataset.fatturaImporto) || 0);
+        if (tipo === 'apertura') {
+          // "Collega" diretto sul saldo di apertura: caso di un movimento che salda (in tutto o in
+          // parte) solo il debito ereditato dal conferimento, senza nessuna fattura vera coinvolta
+          const piva = btn.dataset.collegaFatturaId.slice('apertura:'.length);
+          const { error: errApertura } = await supabase.from('pagamenti_apertura_fornitori').insert({
+            azienda: AZIENDA_SCRITTURA, fornitore_piva: piva, data: movimentoData, importo: importoAllocato, nota: null,
+          });
+          if (errApertura) { alert('Errore: ' + errApertura.message); btn.disabled = false; return; }
+          const { error: errMov } = await chiudiMovimentoConApertura(btn.dataset.fatturaFornitore, importoAllocato);
+          if (errMov) { alert('Errore: ' + errMov.message); btn.disabled = false; return; }
+          await caricaResiduiApertura();
+          if (onSalvato) onSalvato();
+          aggiorna();
+          return;
+        }
         const { error } = await supabase.from('pagamenti_fatture')
           .insert({ movimento_tabella: tabella, movimento_id: rigaId, fattura_id: btn.dataset.collegaFatturaId, fattura_tipo: tipo, importo_allocato: importoAllocato });
         if (error && error.code !== '23505') { alert('Errore: ' + error.message); btn.disabled = false; return; }
@@ -3068,16 +3020,6 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
         input.value = proposto.toFixed(2);
         input.dataset.editedByUser = '1';
         residuoMovimento -= proposto;
-      }
-      // il pagamento su apertura conferimento (se il form e' presente) va proposto sul residuo VERO:
-      // quanto resta del movimento non solo delle fatture gia' salvate (giaAllocatoApertura), ma
-      // anche di quelle spuntate qui sopra in questa stessa sessione del modale, ancora da salvare -
-      // caso reale Due A 20/12/2021: spuntando la fattura 3556 (190,32) su un bonifico di 282,80,
-      // l'apertura deve proporre subito 92,48, non l'intero movimento
-      const aperturaInput = document.getElementById('segnaAperturaImporto');
-      if (aperturaInput && aperturaInput.dataset.editedByUser !== '1') {
-        const residuoPerApertura = Math.max(0, residuoMovimento - giaAllocatoApertura);
-        aperturaInput.value = residuoPerApertura.toFixed(2);
       }
     }
     function aggiornaBarraMultipla() {
@@ -3182,24 +3124,41 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
     // pieno, a finire in pagamenti_fatture.importo_allocato. Le NC stesse non si collegano al
     // movimento (non arriva soldi da li'): il loro importo diventa pagato_altro sulla/e fattura/e che
     // l'hanno assorbita.
+    // riga/e di tipo 'apertura' (vedi caricaResiduiApertura) non vanno in pagamenti_fatture ma in
+    // pagamenti_apertura_fornitori, e non partecipano allo scarico delle note di credito - tutto il
+    // resto della logica (importo pieno modificabile, ordine di spunta) e' condiviso con le fatture
     async function salvaFattureSpuntate() {
       const checchiTutti = Array.from(content.querySelectorAll('.collega-check:checked'));
       const nc = checchiTutti.filter(c => c.dataset.checkNc === '1');
       const fatt = checchiTutti.filter(c => c.dataset.checkNc !== '1');
       const notaRif = nc.map(c => c.dataset.checkNumeroVis).filter(Boolean).join(', ');
       let restanteNC = nc.reduce((s, c) => s + (Number((inputImportoDi(c.dataset.checkId) || {}).value) || 0), 0);
+      let totaleApertura = 0;
+      let nomiApertura = [];
+      let salvataUnaFatturaVera = false;
       for (const chk of fatt) {
         // le note di credito esistono solo per le fatture: su una notula (niente NC possibili) tutto
         // l'importo spuntato va sempre al movimento, mai scalato
         const tipo = chk.dataset.checkTipo || 'acquisto';
         const input = inputImportoDi(chk.dataset.checkId);
         const pieno = input ? (Number(input.value) || 0) : 0;
+        if (tipo === 'apertura') {
+          const piva = chk.dataset.checkId.slice('apertura:'.length);
+          const { error } = await supabase.from('pagamenti_apertura_fornitori').insert({
+            azienda: AZIENDA_SCRITTURA, fornitore_piva: piva, data: movimentoData, importo: pieno, nota: null,
+          });
+          if (error) { alert('Errore: ' + error.message); continue; }
+          totaleApertura += pieno;
+          if (chk.dataset.checkFornitore) nomiApertura.push(chk.dataset.checkFornitore);
+          continue;
+        }
         const usaNC = tipo === 'acquisto' ? Math.min(restanteNC, pieno) : 0;
         const contributoMovimento = pieno - usaNC;
         restanteNC -= usaNC;
         const { error } = await supabase.from('pagamenti_fatture')
           .insert({ movimento_tabella: tabella, movimento_id: rigaId, fattura_tipo: tipo, fattura_id: chk.dataset.checkId, importo_allocato: contributoMovimento });
         if (error && error.code !== '23505') { alert('Errore: ' + error.message); continue; }
+        salvataUnaFatturaVera = true;
         if (tipo === 'acquisto') {
           if (nc.length && usaNC > 0.01) {
             const { data: fRow } = await supabase.from('fatture').select('pagato_altro').eq('id', chk.dataset.checkId).single();
@@ -3213,16 +3172,35 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
           }
         }
       }
-      if (fatt.some(c => (c.dataset.checkTipo || 'acquisto') === 'acquisto')) await registraRegolaSeRichiesto();
+      if (salvataUnaFatturaVera) await registraRegolaSeRichiesto();
+      if (totaleApertura > 0.01) await caricaResiduiApertura();
       selezionati = new Set();
-      return fatt.length > 0;
+      return { totaleApertura, nomeApertura: nomiApertura.join(', ') };
+    }
+    // il totale allocato su fatture vere si rilegge da pagamenti_fatture (non fidandosi di valori
+    // calcolati prima del salvataggio): pagamenti_apertura_fornitori non ha invece un riferimento al
+    // movimento, quindi il contributo di apertura e' solo quello appena versato in QUESTA azione
+    async function chiudiMovimentoConApertura(nomeFornitore, importoAperturaOra) {
+      const { data: linkOra } = await supabase.from('pagamenti_fatture')
+        .select('importo_allocato').eq('movimento_tabella', tabella).eq('movimento_id', rigaId);
+      const totaleAllocatoFatture = (linkOra || []).reduce((s, l) => s + (Number(l.importo_allocato) || 0), 0);
+      const riconciliatoOra = (totaleAllocatoFatture + importoAperturaOra) >= movimentoImporto - 0.02;
+      return supabase.from(tabella).update({
+        riconciliato: riconciliatoOra, codice_conto: null,
+        nota_acconto: `Acconto su apertura conferimento (${nomeFornitore || 'fornitore'})`,
+      }).eq('id', rigaId);
     }
     const btnCollegaMultiple = document.getElementById('btnCollegaMultiple');
     if (btnCollegaMultiple) btnCollegaMultiple.addEventListener('click', async () => {
       if (btnCollegaMultiple.disabled) return;
       btnCollegaMultiple.disabled = true;
-      await salvaFattureSpuntate();
-      await aggiornaRiconciliatoMovimento(tabella, rigaId);
+      const { totaleApertura, nomeApertura } = await salvaFattureSpuntate();
+      if (totaleApertura > 0.01) {
+        const { error } = await chiudiMovimentoConApertura(nomeApertura, totaleApertura);
+        if (error) alert('Errore: ' + error.message);
+      } else {
+        await aggiornaRiconciliatoMovimento(tabella, rigaId);
+      }
       if (onSalvato) onSalvato();
       aggiorna();
     });
@@ -3293,7 +3271,20 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
       fornitore_denominazione: f.agente_nome, tipo_documento: null, pagato_altro: 0, pagato_altro_note: null,
       _tipo: 'notula', _pagato: pagatoMapN[f.id] || 0,
     }));
-    const arricchiti = [...arricchitiFatture, ...arricchitiNotule];
+    // il saldo di apertura conferimento di un fornitore compare come una riga in piu' fra i
+    // risultati, spuntabile esattamente come una fattura (vedi il commento su caricaResiduiApertura):
+    // stessa logica di ricerca per nome delle fatture, cosi' non serve sapere in anticipo quali
+    // fornitori hanno un residuo di apertura
+    const arricchitiApertura = mostraTutte
+      ? residuiApertura
+      : residuiApertura.filter(r => parole.every(w => (r.nome || '').toLowerCase().includes(w.toLowerCase())));
+    const arricchitiAperturaRighe = arricchitiApertura.map(r => ({
+      id: `apertura:${r.piva}`, numero: 'Saldo apertura conferimento', data: DATA_CONFERIMENTO_APERTURA,
+      importo_totale: r.residuo, fornitore_denominazione: r.nome, fornitore_piva: r.piva,
+      tipo_documento: null, pagato_altro: 0, pagato_altro_note: null,
+      _tipo: 'apertura', _pagato: 0,
+    }));
+    const arricchiti = [...arricchitiFatture, ...arricchitiNotule, ...arricchitiAperturaRighe];
     // le fatture/notule ancora aperte (o non ancora toccate) prima; le note di credito (non si
     // "pagano") e i documenti gia' saldati per intero vanno in fondo, sono quasi sempre un clic sbagliato
     arricchiti.sort((a, b) => {
@@ -3382,7 +3373,7 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
     if (term) { await eseguiRicerca(); } else { renderModale(null, linkAttuali); }
   }
 
-  eseguiRicerca();
+  caricaResiduiApertura().then(eseguiRicerca);
 }
 
 function chiudiModaleCollega() {
