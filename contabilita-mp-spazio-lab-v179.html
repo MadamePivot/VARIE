@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 178</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 179</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -2634,14 +2634,16 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
 
   function renderModale(risultati, linkAttuali) {
     if (meGen !== modaleCollegaGen) return;
-    // per "Segna come pagamento su apertura conferimento": serve sapere a quale fornitore attribuire
-    // l'acconto sul debito ereditato dalla ditta individuale. Si ricava dai risultati di ricerca gia'
-    // a schermo (un solo fornitore alla volta, mai con "mostra tutte" che mischia fornitori diversi) -
-    // niente di nuovo da cercare, la ricerca per nome fornitore la fa gia' esistere qui.
+    // per "Segna come pagamento su apertura conferimento": la P.IVA si propone da sola quando i
+    // risultati di ricerca puntano tutti a un unico fornitore, ma resta sempre scrivibile a mano nel
+    // campo del form - trovato un caso reale (Due A) dove il rilevamento automatico falliva
+    // (probabile P.IVA salvata in formato incoerente tra fatture vecchie e nuove), quindi non ci si
+    // affida piu' solo a quello: si vede "Clienti e Fornitori" per la P.IVA esatta da incollare.
     const pivaAperturaTrovate = [...new Set((risultati || []).map(f => f.fornitore_piva).filter(Boolean))];
-    const fornitoreApertura = pivaAperturaTrovate.length === 1
-      ? { piva: pivaAperturaTrovate[0], nome: (risultati.find(f => f.fornitore_piva === pivaAperturaTrovate[0]) || {}).fornitore_denominazione || '' }
-      : null;
+    const pivaAperturaProposta = pivaAperturaTrovate.length === 1 ? pivaAperturaTrovate[0] : '';
+    const nomeAperturaProposto = pivaAperturaProposta
+      ? ((risultati.find(f => f.fornitore_piva === pivaAperturaProposta) || {}).fornitore_denominazione || '')
+      : (termineIniziale || '');
     // quanto e' gia' allocato su fatture vere: serve per proporre solo il residuo all'apertura, non
     // l'intero movimento - caso reale Due A, 20/12/2021: 282,80 di cui 190,32 sulla fattura 3556 e
     // solo i restanti 92,48 sul saldo di apertura (confermato dal mastrino Mexal originale)
@@ -2664,17 +2666,18 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
         </div>
       </div>
       <div style="margin:6px 0 10px;">
-        ${fornitoreApertura ? `
-        <a href="#" id="segnaAperturaToggle" style="font-size:12px;">Segna come pagamento su saldo di apertura conferimento (${(fornitoreApertura.nome || '').replace(/</g, '&lt;')})</a>
+        <a href="#" id="segnaAperturaToggle" style="font-size:12px;">Segna come pagamento su saldo di apertura conferimento</a>
         <div id="segnaAperturaForm" style="display:none; margin-top:6px; padding:8px; background:var(--bg-soft,#f4f4f2); border-radius:6px;">
           <div style="display:flex; gap:8px; margin-bottom:6px; flex-wrap:wrap; align-items:center;">
+            <input type="text" id="segnaAperturaPiva" value="${pivaAperturaProposta.replace(/"/g, '&quot;')}" placeholder="P.IVA/CF fornitore" style="width:160px; padding:6px;" title="Precompilata se la ricerca punta a un unico fornitore, ma scrivibile a mano: copiala da 'Clienti e Fornitori' se non e' corretta o resta vuota">
+            <input type="text" id="segnaAperturaNomeFornitore" value="${nomeAperturaProposto.replace(/"/g, '&quot;')}" placeholder="Nome fornitore (per la nota)" style="min-width:160px; padding:6px;">
             <input type="number" step="0.01" id="segnaAperturaImporto" value="${residuoApertura.toFixed(2)}" style="width:100px; padding:6px;" title="Importo da destinare al saldo di apertura: modificabile, di default e' quanto resta del movimento dopo eventuali fatture gia' collegate">
-            <input type="text" id="segnaAperturaNota" placeholder="Nota (facoltativa)" style="flex:1; min-width:200px; padding:6px;">
+            <input type="text" id="segnaAperturaNota" placeholder="Nota (facoltativa)" style="flex:1; min-width:160px; padding:6px;">
             <button type="button" class="btn secondary" id="segnaAperturaConferma">Conferma</button>
           </div>
-          <p class="muted" style="margin:0; font-size:11px;">Per il debito ereditato dalla ditta individuale al momento del conferimento in SRL (04/05/2021), non collegato a nessuna fattura vera. L'importo proposto (€ ${fmtEUR(residuoApertura)}) e' quanto resta del movimento (€ ${fmtEUR(movimentoImporto)}) al netto di eventuali fatture gia' collegate qui sopra${giaAllocatoApertura > 0.02 ? ` (€ ${fmtEUR(giaAllocatoApertura)} gia' allocati)` : ''} - modificalo se serve dividere diversamente. Registra l'importo come acconto sul saldo di apertura di ${(fornitoreApertura.nome || '').replace(/</g, '&lt;')} (visibile nel suo Mastrino Fornitori); il movimento risulta riconciliato solo se la somma tra fatture collegate e apertura copre l'intero importo.</p>
+          <p class="muted" style="margin:0; font-size:11px;">Per il debito ereditato dalla ditta individuale al momento del conferimento in SRL (04/05/2021), non collegato a nessuna fattura vera. La P.IVA si propone da sola solo se la ricerca qui sopra punta a un unico fornitore: se resta vuota o e' sbagliata, vai su "Clienti e Fornitori", copia la P.IVA/CF esatta e incollala qui. L'importo proposto (€ ${fmtEUR(residuoApertura)}) e' quanto resta del movimento (€ ${fmtEUR(movimentoImporto)}) al netto di eventuali fatture gia' collegate qui sopra${giaAllocatoApertura > 0.02 ? ` (€ ${fmtEUR(giaAllocatoApertura)} gia' allocati)` : ''} - modificalo se serve dividere diversamente. Il movimento risulta riconciliato solo se la somma tra fatture collegate e apertura copre l'intero importo.</p>
           <div id="segnaAperturaStatus" style="font-size:12px; margin-top:4px;"></div>
-        </div>` : `<span class="muted" style="font-size:11px;" title="Serve prima una ricerca per nome di un unico fornitore (non 'mostra tutte'), per sapere a chi attribuire l'acconto">Per segnare un pagamento su saldo di apertura conferimento, cerca prima il fornitore per nome qui sopra.</span>`}
+        </div>
       </div>
       ${linkAttuali.length ? `
         <h3 style="margin-top:14px;">Fatture gia' collegate a questo movimento</h3>
@@ -2930,7 +2933,13 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
     const segnaAperturaConferma = document.getElementById('segnaAperturaConferma');
     if (segnaAperturaConferma) segnaAperturaConferma.addEventListener('click', async () => {
       const statusEl = document.getElementById('segnaAperturaStatus');
-      if (!fornitoreApertura) return;
+      const piva = document.getElementById('segnaAperturaPiva').value.trim();
+      if (!piva) {
+        statusEl.textContent = 'Inserisci la P.IVA/CF del fornitore (copiala da "Clienti e Fornitori" se serve).';
+        statusEl.style.color = '#b00';
+        return;
+      }
+      const nomeFornitore = document.getElementById('segnaAperturaNomeFornitore').value.trim() || piva;
       const importoApertura = Number(document.getElementById('segnaAperturaImporto').value) || 0;
       if (importoApertura <= 0) {
         statusEl.textContent = 'Inserisci un importo maggiore di zero.';
@@ -2945,14 +2954,14 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
       // 20/12/2021: 190,32 sulla fattura 3556 + 92,48 di apertura = 282,80 del movimento), quindi
       // "riconciliato" diventa true solo se fatture gia' collegate + questo importo coprono il totale
       const { error: errApertura } = await supabase.from('pagamenti_apertura_fornitori').insert({
-        azienda: AZIENDA_SCRITTURA, fornitore_piva: fornitoreApertura.piva,
+        azienda: AZIENDA_SCRITTURA, fornitore_piva: piva,
         data: movimentoData, importo: importoApertura, nota: nota || null,
       });
       if (errApertura) { statusEl.textContent = 'Errore: ' + errApertura.message; statusEl.style.color = '#b00'; return; }
       const riconciliatoOra = (giaAllocatoApertura + importoApertura) >= movimentoImporto - 0.02;
       const { error: errMov } = await supabase.from(tabella).update({
         riconciliato: riconciliatoOra, codice_conto: null,
-        nota_acconto: `Acconto su apertura conferimento (${fornitoreApertura.nome})${nota ? ' - ' + nota : ''}`,
+        nota_acconto: `Acconto su apertura conferimento (${nomeFornitore})${nota ? ' - ' + nota : ''}`,
       }).eq('id', rigaId);
       if (errMov) { statusEl.textContent = 'Errore: ' + errMov.message; statusEl.style.color = '#b00'; return; }
       if (onSalvato) onSalvato();
