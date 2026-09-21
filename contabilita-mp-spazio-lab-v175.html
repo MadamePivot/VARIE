@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 174</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 175</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -4137,10 +4137,13 @@ async function loadMovimenti() {
       });
       container.querySelectorAll('[data-annulla-acconto-id]').forEach(btn => {
         btn.addEventListener('click', async () => {
-          // "Segna come acconto" assegna insieme nota e conto transitorio (vedi apriModaleCollega):
-          // annullare toglie entrambi insieme, il movimento torna tra quelli da categorizzare
-          if (!confirm('Togliere il flag "Acconto in attesa fattura"? Viene tolto anche il conto assegnato tramite questa funzione: il movimento torna tra quelli da categorizzare.')) return;
-          const { error } = await supabase.from(btn.dataset.annullaAccontoTabella).update({ nota_acconto: null, codice_conto: null }).eq('id', btn.dataset.annullaAccontoId);
+          // questo bottone compare per qualunque nota_acconto, non solo "Segna come acconto": anche
+          // "Ditta vecchia" ed "Escludi" la usano, e loro impostano anche riconciliato:true - annullare
+          // deve rimettere il movimento esattamente come prima su tutti e tre i campi, altrimenti
+          // (bug segnalato dall'utente su un bonifico "Ditta vecchia" per errore, FATTURA 2830 di Due
+          // A) restava riconciliato:true senza nessun collegamento vero, invisibile a "da riconciliare"
+          if (!confirm('Togliere questa nota (acconto, ditta vecchia o esclusione)? Il movimento torna tra quelli da riconciliare, senza conto ne\' collegamenti.')) return;
+          const { error } = await supabase.from(btn.dataset.annullaAccontoTabella).update({ nota_acconto: null, codice_conto: null, riconciliato: false }).eq('id', btn.dataset.annullaAccontoId);
           if (error) { alert('Errore: ' + error.message); return; }
           loadMovimenti();
         });
@@ -5478,7 +5481,7 @@ async function loadAccontiInAttesaInterno(statusEl) {
       container.querySelectorAll('[data-acconto-annulla-tabella]').forEach(btn => {
         btn.addEventListener('click', async () => {
           if (!confirm('Togliere il flag "Acconto in attesa fattura"? Viene tolto anche il conto assegnato tramite questa funzione: il movimento torna tra quelli da categorizzare.')) return;
-          const { error } = await supabase.from(btn.dataset.accontoAnnullaTabella).update({ nota_acconto: null, codice_conto: null }).eq('id', btn.dataset.accontoAnnullaId);
+          const { error } = await supabase.from(btn.dataset.accontoAnnullaTabella).update({ nota_acconto: null, codice_conto: null, riconciliato: false }).eq('id', btn.dataset.accontoAnnullaId);
           if (error) { alert('Errore: ' + error.message); return; }
           loadAccontiInAttesa();
         });
@@ -5752,8 +5755,10 @@ async function loadCarta() {
       });
       container.querySelectorAll('[data-annulla-acconto-id]').forEach(btn => {
         btn.addEventListener('click', async () => {
-          if (!confirm('Togliere il flag "Acconto in attesa fattura"? Viene tolto anche il conto assegnato tramite questa funzione: il movimento torna tra quelli da categorizzare.')) return;
-          const { error } = await supabase.from(btn.dataset.annullaAccontoTabella).update({ nota_acconto: null, codice_conto: null }).eq('id', btn.dataset.annullaAccontoId);
+          // stesso fix di Movimenti Bancari: questo bottone serve anche per "Ditta vecchia" ed
+          // "Escludi" (riconciliato:true, nessun collegamento vero), non solo per "Segna come acconto"
+          if (!confirm('Togliere questa nota (acconto, ditta vecchia o esclusione)? Il movimento torna tra quelli da riconciliare, senza conto ne\' collegamenti.')) return;
+          const { error } = await supabase.from(btn.dataset.annullaAccontoTabella).update({ nota_acconto: null, codice_conto: null, riconciliato: false }).eq('id', btn.dataset.annullaAccontoId);
           if (error) { alert('Errore: ' + error.message); return; }
           loadCarta();
         });
