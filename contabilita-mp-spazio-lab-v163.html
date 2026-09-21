@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 162</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 163</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -5383,6 +5383,7 @@ async function loadAccontiInAttesaInterno(statusEl) {
         <td style="white-space:nowrap;">
           <button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" data-acconto-collega-tabella="${r.tabella}" data-acconto-collega-id="${r.id}" data-acconto-collega-descr="${(r.descrizione || '').replace(/"/g, '&quot;')}">&#128279; Collega</button>
           ${r.tipo === 'acconto' ? `<button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" data-acconto-annulla-tabella="${r.tabella}" data-acconto-annulla-id="${r.id}">Annulla</button>` : ''}
+          ${r.tipo === 'nuovo' ? `<button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" title="Movimento dell'attivita' individuale precedente al conferimento in SRL: non riguarda nessuna fattura di questa azienda" data-vecchia-ditta-tabella="${r.tabella}" data-vecchia-ditta-id="${r.id}">Ditta vecchia</button>` : ''}
         </td>
       </tr>`) : [`<tr><td colspan="7" class="muted" style="padding:14px;">Niente da abbinare: tutti i movimenti sono riconciliati o gia' categorizzati.</td></tr>`],
     afterRender: (container) => {
@@ -5394,6 +5395,22 @@ async function loadAccontiInAttesaInterno(statusEl) {
           if (!confirm('Togliere il flag "Acconto in attesa fattura"? Viene tolto anche il conto assegnato tramite questa funzione: il movimento torna tra quelli da categorizzare.')) return;
           const { error } = await supabase.from(btn.dataset.accontoAnnullaTabella).update({ nota_acconto: null, codice_conto: null }).eq('id', btn.dataset.accontoAnnullaId);
           if (error) { alert('Errore: ' + error.message); return; }
+          loadAccontiInAttesa();
+        });
+      });
+      // stesso meccanismo gia' usato per i movimenti_bancari (vedi loadMovimenti): qui pero' serve
+      // anche per movimenti_carta, che finora non aveva questo bottone da nessuna parte nell'app -
+      // American Express/altre carte hanno anche loro storico precedente al conferimento in SRL
+      container.querySelectorAll('[data-vecchia-ditta-tabella]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (btn.disabled) return;
+          if (!confirm('Segnare questo movimento come attivita\' individuale ante conferimento in SRL? Verra\' tolto dalla lista da riconciliare senza collegarlo a nessuna fattura.')) return;
+          btn.disabled = true;
+          const { error } = await supabase.from(btn.dataset.vecchiaDittaTabella).update({
+            riconciliato: true,
+            nota_acconto: 'Attivita\' individuale ante conferimento in SRL',
+          }).eq('id', btn.dataset.vecchiaDittaId);
+          if (error) { alert('Errore: ' + error.message); btn.disabled = false; return; }
           loadAccontiInAttesa();
         });
       });
