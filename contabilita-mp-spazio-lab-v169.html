@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 168</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 169</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -6942,7 +6942,7 @@ async function loadMastriniFornitoreRows() {
   let pagamenti = [];
   if (fattureIds.length) {
     const { data: link, error: errL } = await supabase.from('pagamenti_fatture')
-      .select('movimento_tabella,movimento_id,fattura_id,importo_allocato').eq('fattura_tipo', 'acquisto').in('fattura_id', fattureIds);
+      .select('id,movimento_tabella,movimento_id,fattura_id,importo_allocato').eq('fattura_tipo', 'acquisto').in('fattura_id', fattureIds);
     if (meGen !== mastriniFornitoreGen) return;
     if (errL) { document.getElementById('mastriniFornitoriTable').textContent = 'Errore: ' + errL.message; return; }
     const idsBanca = (link || []).filter(l => l.movimento_tabella === 'movimenti_bancari').map(l => l.movimento_id);
@@ -6965,6 +6965,7 @@ async function loadMastriniFornitoreRows() {
       return {
         fattura_id: l.fattura_id, data: m.data_operazione, importo,
         descrizione: estraiSegmentoRibaDecomposta(descrizioneCompleta, nomeFornitoreCorrente),
+        linkId: l.id, movimentoTabella: l.movimento_tabella, movimentoId: l.movimento_id,
       };
     }).filter(Boolean);
   }
@@ -6985,7 +6986,7 @@ async function loadMastriniFornitoreRows() {
         pagatoSuFattura: (pagatoPerFattura[f.id] || 0) + pagatoAltro,
       };
     }),
-    ...pagamenti.map(p => ({ data: p.data, tipo: 'pagamento', descrizione: p.descrizione, avere: 0, dare: p.importo })),
+    ...pagamenti.map(p => ({ data: p.data, tipo: 'pagamento', descrizione: p.descrizione, avere: 0, dare: p.importo, linkId: p.linkId, movimentoTabella: p.movimentoTabella, movimentoId: p.movimentoId })),
     // abbuono/arrotondamento/cassa (fatture.pagato_altro): riduce il debito esattamente come un
     // pagamento vero, quindi va nel saldo progressivo come le altre righe "dare" - senza questa riga
     // una fattura chiusa per abbuono restava per sempre a debito nel mastrino
@@ -7041,6 +7042,8 @@ async function loadMastriniFornitoreRows() {
         <td class="num">${fmtEUR(r.saldo)}</td>
         <td>${r.tipo === 'fattura' && r.pagatoSuFattura < r.fatturaImporto - 0.02
           ? `<button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" data-collega-fattura-pag="${r.fatturaId}" data-fattura-numero="${r.fatturaNumero}" data-fattura-data="${r.fatturaData}" data-fattura-importo="${r.fatturaImporto - r.pagatoSuFattura}" data-fattura-fornitore="${(r.fatturaFornitore || '').replace(/"/g, '&quot;')}">&#128279; Collega pagamento</button>`
+          : r.tipo === 'pagamento'
+          ? `<button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" title="Toglie il collegamento tra questo movimento e questa fattura" data-scollega-pag-link-id="${r.linkId}" data-scollega-pag-mov-tabella="${r.movimentoTabella}" data-scollega-pag-mov-id="${r.movimentoId}">Scollega</button>`
           : ''}</td>
       </tr>`),
     afterRender: (container) => {
@@ -7049,6 +7052,19 @@ async function loadMastriniFornitoreRows() {
           btn.dataset.collegaFatturaPag, 'acquisto', btn.dataset.fatturaNumero, btn.dataset.fatturaData,
           Number(btn.dataset.fatturaImporto), loadMastriniFornitoreRows, btn.dataset.fatturaFornitore
         ));
+      });
+      // stesso "Scollega" gia' disponibile nel modale Collega sul movimento: qui evita di dover
+      // andare a cercare il movimento altrove quando lo si nota gia' scorrendo il mastrino
+      container.querySelectorAll('[data-scollega-pag-link-id]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (btn.disabled) return;
+          if (!confirm('Togliere questo collegamento? La fattura torna (in tutto o in parte) da pagare, il movimento torna da collegare.')) return;
+          btn.disabled = true;
+          const { error } = await supabase.from('pagamenti_fatture').delete().eq('id', btn.dataset.scollegaPagLinkId);
+          if (error) { alert('Errore: ' + error.message); btn.disabled = false; return; }
+          await aggiornaRiconciliatoMovimento(btn.dataset.scollegaPagMovTabella, btn.dataset.scollegaPagMovId);
+          loadMastriniFornitoreRows();
+        });
       });
     },
   });
