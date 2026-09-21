@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 179</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 180</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -2675,7 +2675,7 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
             <input type="text" id="segnaAperturaNota" placeholder="Nota (facoltativa)" style="flex:1; min-width:160px; padding:6px;">
             <button type="button" class="btn secondary" id="segnaAperturaConferma">Conferma</button>
           </div>
-          <p class="muted" style="margin:0; font-size:11px;">Per il debito ereditato dalla ditta individuale al momento del conferimento in SRL (04/05/2021), non collegato a nessuna fattura vera. La P.IVA si propone da sola solo se la ricerca qui sopra punta a un unico fornitore: se resta vuota o e' sbagliata, vai su "Clienti e Fornitori", copia la P.IVA/CF esatta e incollala qui. L'importo proposto (€ ${fmtEUR(residuoApertura)}) e' quanto resta del movimento (€ ${fmtEUR(movimentoImporto)}) al netto di eventuali fatture gia' collegate qui sopra${giaAllocatoApertura > 0.02 ? ` (€ ${fmtEUR(giaAllocatoApertura)} gia' allocati)` : ''} - modificalo se serve dividere diversamente. Il movimento risulta riconciliato solo se la somma tra fatture collegate e apertura copre l'intero importo.</p>
+          <p class="muted" style="margin:0; font-size:11px;">Per il debito ereditato dalla ditta individuale al momento del conferimento in SRL (04/05/2021), non collegato a nessuna fattura vera. La P.IVA si propone da sola solo se la ricerca qui sopra punta a un unico fornitore: se resta vuota o e' sbagliata, vai su "Clienti e Fornitori", copia la P.IVA/CF esatta e incollala qui. L'importo proposto e' quanto resta del movimento (€ ${fmtEUR(movimentoImporto)}) al netto delle fatture gia' collegate o spuntate qui sopra${giaAllocatoApertura > 0.02 ? ` (€ ${fmtEUR(giaAllocatoApertura)} gia' allocati)` : ''}: si aggiorna da solo se spunti una fattura sopra, ma resta modificabile a mano se serve dividere diversamente. Il movimento risulta riconciliato solo se la somma tra fatture collegate e apertura copre l'intero importo.</p>
           <div id="segnaAperturaStatus" style="font-size:12px; margin-top:4px;"></div>
         </div>
       </div>
@@ -2930,8 +2930,15 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
       form.style.display = form.style.display === 'none' ? 'block' : 'none';
       posizionaStickyCollega();
     });
+    const segnaAperturaImportoInput = document.getElementById('segnaAperturaImporto');
+    // come per le fatture (vedi editedByUser piu' sotto): appena l'utente tocca a mano l'importo
+    // dell'apertura, il ricalcolo automatico smette di sovrascriverlo
+    if (segnaAperturaImportoInput) segnaAperturaImportoInput.addEventListener('input', () => {
+      segnaAperturaImportoInput.dataset.editedByUser = '1';
+    });
     const segnaAperturaConferma = document.getElementById('segnaAperturaConferma');
     if (segnaAperturaConferma) segnaAperturaConferma.addEventListener('click', async () => {
+      if (segnaAperturaConferma.disabled) return;
       const statusEl = document.getElementById('segnaAperturaStatus');
       const piva = document.getElementById('segnaAperturaPiva').value.trim();
       if (!piva) {
@@ -2947,23 +2954,34 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
         return;
       }
       const nota = document.getElementById('segnaAperturaNota').value.trim();
+      segnaAperturaConferma.disabled = true;
+      // pagamento diviso (caso reale Due A, 20/12/2021: 190,32 sulla fattura 3556 + 92,48 di apertura
+      // = 282,80 del movimento): se qui sopra e' spuntata una fattura non ancora salvata, la si salva
+      // insieme, altrimenti "Conferma" chiuderebbe subito il modale (vedi sotto) perdendo quel
+      // collegamento mai registrato
+      if (content.querySelectorAll('.collega-check:checked').length) await salvaFattureSpuntate();
       // due scritture separate: la riga sul saldo di apertura (per il Mastrino Fornitori, vedi
       // pagamenti_apertura_fornitori) e la chiusura del movimento stesso (riconciliato + nota, stesso
       // meccanismo di "Ditta vecchia"/"Escludi") - solo per l'importo indicato, non necessariamente
-      // tutto il movimento: puo' esserci gia' una fattura vera collegata sopra (caso reale Due A,
-      // 20/12/2021: 190,32 sulla fattura 3556 + 92,48 di apertura = 282,80 del movimento), quindi
-      // "riconciliato" diventa true solo se fatture gia' collegate + questo importo coprono il totale
+      // tutto il movimento: puo' esserci gia' una fattura vera collegata sopra, quindi "riconciliato"
+      // diventa true solo se fatture collegate + questo importo coprono il totale
       const { error: errApertura } = await supabase.from('pagamenti_apertura_fornitori').insert({
         azienda: AZIENDA_SCRITTURA, fornitore_piva: piva,
         data: movimentoData, importo: importoApertura, nota: nota || null,
       });
-      if (errApertura) { statusEl.textContent = 'Errore: ' + errApertura.message; statusEl.style.color = '#b00'; return; }
-      const riconciliatoOra = (giaAllocatoApertura + importoApertura) >= movimentoImporto - 0.02;
+      if (errApertura) { statusEl.textContent = 'Errore: ' + errApertura.message; statusEl.style.color = '#b00'; segnaAperturaConferma.disabled = false; return; }
+      // il totale allocato su fatture vere puo' essere appena cambiato dal salvataggio qui sopra: si
+      // rilegge invece di fidarsi di giaAllocatoApertura, calcolato all'apertura del modale e ormai
+      // stantio in questo caso
+      const { data: linkOra } = await supabase.from('pagamenti_fatture')
+        .select('importo_allocato').eq('movimento_tabella', tabella).eq('movimento_id', rigaId);
+      const totaleAllocatoFatture = (linkOra || []).reduce((s, l) => s + (Number(l.importo_allocato) || 0), 0);
+      const riconciliatoOra = (totaleAllocatoFatture + importoApertura) >= movimentoImporto - 0.02;
       const { error: errMov } = await supabase.from(tabella).update({
         riconciliato: riconciliatoOra, codice_conto: null,
         nota_acconto: `Acconto su apertura conferimento (${nomeFornitore})${nota ? ' - ' + nota : ''}`,
       }).eq('id', rigaId);
-      if (errMov) { statusEl.textContent = 'Errore: ' + errMov.message; statusEl.style.color = '#b00'; return; }
+      if (errMov) { statusEl.textContent = 'Errore: ' + errMov.message; statusEl.style.color = '#b00'; segnaAperturaConferma.disabled = false; return; }
       if (onSalvato) onSalvato();
       chiudiModaleCollega();
     });
@@ -3050,6 +3068,16 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
         input.value = proposto.toFixed(2);
         input.dataset.editedByUser = '1';
         residuoMovimento -= proposto;
+      }
+      // il pagamento su apertura conferimento (se il form e' presente) va proposto sul residuo VERO:
+      // quanto resta del movimento non solo delle fatture gia' salvate (giaAllocatoApertura), ma
+      // anche di quelle spuntate qui sopra in questa stessa sessione del modale, ancora da salvare -
+      // caso reale Due A 20/12/2021: spuntando la fattura 3556 (190,32) su un bonifico di 282,80,
+      // l'apertura deve proporre subito 92,48, non l'intero movimento
+      const aperturaInput = document.getElementById('segnaAperturaImporto');
+      if (aperturaInput && aperturaInput.dataset.editedByUser !== '1') {
+        const residuoPerApertura = Math.max(0, residuoMovimento - giaAllocatoApertura);
+        aperturaInput.value = residuoPerApertura.toFixed(2);
       }
     }
     function aggiornaBarraMultipla() {
@@ -3143,18 +3171,18 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
     });
     ricalcolaDefaultImporti();
     aggiornaBarraMultipla();
-    const btnCollegaMultiple = document.getElementById('btnCollegaMultiple');
-    if (btnCollegaMultiple) btnCollegaMultiple.addEventListener('click', async () => {
-      if (btnCollegaMultiple.disabled) return;
-      btnCollegaMultiple.disabled = true;
-      // qui si collegano piu' fatture in un colpo solo (es. una Ri.Ba. che salda insieme due fatture
-      // dello stesso fornitore, o una rata fissa divisa su piu' fatture): l'importo mostrato (e
-      // modificabile) accanto a ciascuna fattura e' il suo valore pieno, non necessariamente cio' che
-      // arriva dal movimento - se sono spuntate anche delle note di credito, il loro totale va
-      // "scalato" dal contributo versato dal movimento sulle fatture (in ordine, la prima spuntata
-      // assorbe la NC per prima finche' non si esaurisce): e' solo quel resto, non il valore pieno, a
-      // finire in pagamenti_fatture.importo_allocato. Le NC stesse non si collegano al movimento (non
-      // arriva soldi da li'): il loro importo diventa pagato_altro sulla/e fattura/e che l'hanno assorbita.
+    // qui si salvano le fatture/NC spuntate: usata sia dal tasto "Collega selezionate" sia dalla
+    // conferma dell'apertura conferimento, per il caso di un pagamento diviso fra una fattura vera e
+    // il saldo di apertura (es. Due A 20/12/2021, 190,32 + 92,48) - senza questo, spuntare la fattura
+    // e poi confermare solo l'apertura chiudeva il modale senza mai salvare il collegamento spuntato.
+    // L'importo mostrato (e modificabile) accanto a ciascuna fattura e' il suo valore pieno, non
+    // necessariamente cio' che arriva dal movimento - se sono spuntate anche delle note di credito, il
+    // loro totale va "scalato" dal contributo versato dal movimento sulle fatture (in ordine, la prima
+    // spuntata assorbe la NC per prima finche' non si esaurisce): e' solo quel resto, non il valore
+    // pieno, a finire in pagamenti_fatture.importo_allocato. Le NC stesse non si collegano al
+    // movimento (non arriva soldi da li'): il loro importo diventa pagato_altro sulla/e fattura/e che
+    // l'hanno assorbita.
+    async function salvaFattureSpuntate() {
       const checchiTutti = Array.from(content.querySelectorAll('.collega-check:checked'));
       const nc = checchiTutti.filter(c => c.dataset.checkNc === '1');
       const fatt = checchiTutti.filter(c => c.dataset.checkNc !== '1');
@@ -3185,9 +3213,16 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
           }
         }
       }
-      await aggiornaRiconciliatoMovimento(tabella, rigaId);
       if (fatt.some(c => (c.dataset.checkTipo || 'acquisto') === 'acquisto')) await registraRegolaSeRichiesto();
       selezionati = new Set();
+      return fatt.length > 0;
+    }
+    const btnCollegaMultiple = document.getElementById('btnCollegaMultiple');
+    if (btnCollegaMultiple) btnCollegaMultiple.addEventListener('click', async () => {
+      if (btnCollegaMultiple.disabled) return;
+      btnCollegaMultiple.disabled = true;
+      await salvaFattureSpuntate();
+      await aggiornaRiconciliatoMovimento(tabella, rigaId);
       if (onSalvato) onSalvato();
       aggiorna();
     });
