@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 154</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 155</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -263,6 +263,18 @@
       <h3>Fornitori a saldo anomalo (a nostro credito)</h3>
       <p class="muted" style="margin-top:-6px;">Un fornitore con saldo positivo vuol dire che gli abbiamo versato piu' di quanto fatturato: quasi sempre una nota di credito non ancora registrata, o un pagamento contato due volte.</p>
       <div class="table-wrap"><div id="verificaSaldoAnomaloTable"></div></div>
+    </div>
+  </section>
+
+  <section id="tab-accontiInAttesa">
+    <div class="card">
+      <h2>Acconti in attesa</h2>
+      <p class="muted">Tutti i movimenti (banca + carta) segnati "acconto in attesa fattura" dal modale Collega, in un unico elenco invece di doverli cercare uno per uno nei Mastrini. Ogni riga e' gia' registrata sul conto transitorio scelto al momento (visibile anche li'): da qui puoi collegarla direttamente alla fattura appena arriva, oppure annullare il flag se non serve piu'.</p>
+      <div class="toolbar" style="flex-wrap:wrap;">
+        <button class="btn secondary" id="btnRefreshAccontiInAttesa">Aggiorna</button>
+        <span class="muted" id="accontiInAttesaStatus"></span>
+      </div>
+      <div class="table-wrap"><div id="accontiInAttesaTable"></div></div>
     </div>
   </section>
 
@@ -808,6 +820,7 @@ function loadActiveTab() {
   if (id === 'daAssegnare') loadDaAssegnare();
   if (id === 'righeDaAssegnare') loadRigheDaAssegnare();
   if (id === 'verificaRiconciliazioni') loadVerificaRiconciliazioni();
+  if (id === 'accontiInAttesa') loadAccontiInAttesa();
   if (id === 'acquisto') loadAcquisto();
   if (id === 'vendita') loadVendita();
   if (id === 'mastrinoCliente') loadMastrinoCliente();
@@ -838,6 +851,7 @@ const NAV = [
     { id: 'daAssegnare', label: 'Da Assegnare' },
     { id: 'righeDaAssegnare', label: 'Righe da Assegnare' },
     { id: 'verificaRiconciliazioni', label: 'Verifica Riconciliazioni' },
+    { id: 'accontiInAttesa', label: 'Acconti in attesa' },
   ]},
   { group: 'Fatture', items: [
     { id: 'acquisto', label: 'Fatture Acquisto' },
@@ -5240,6 +5254,80 @@ async function loadVerificaRiconciliazioni() {
     `${parziali.length} movimenti parziali · ${abbinamentiNC.length} possibili compensazioni · ${anomali.length} fornitori a saldo anomalo`;
 }
 document.getElementById('btnRefreshVerifica').addEventListener('click', loadVerificaRiconciliazioni);
+
+// elenco unico di tutti i movimenti "in attesa fattura" (vedi "Segna come acconto" dentro
+// apriModaleCollega): riconciliato=false + nota_acconto valorizzata individua esattamente questo
+// insieme, perche' le altre due funzioni che scrivono nota_acconto ("Ditta vecchia", "Escludi")
+// impostano sempre riconciliato=true insieme alla nota - quei casi sono gia' risolti, non "in attesa"
+async function loadAccontiInAttesa() {
+  const statusEl = document.getElementById('accontiInAttesaStatus');
+  statusEl.textContent = 'Caricamento...';
+  const [{ data: movBanca, error: errMB }, { data: movCarta, error: errMC }] = await Promise.all([
+    fetchTutteLeRighe(() => supabase.from('movimenti_bancari')
+      .select('id,data_operazione,descrizione,dare,avere,codice_conto,nota_acconto,banca')
+      .in('azienda', AZIENDE_LETTURA).eq('riconciliato', false).not('nota_acconto', 'is', null)),
+    fetchTutteLeRighe(() => supabase.from('movimenti_carta')
+      .select('id,data_operazione,descrizione,importo,codice_conto,nota_acconto,carta')
+      .in('azienda', AZIENDE_LETTURA).eq('riconciliato', false).not('nota_acconto', 'is', null)),
+  ]);
+  if (errMB || errMC) { statusEl.textContent = 'Errore: ' + (errMB || errMC).message; return; }
+
+  const descrizioneConto = (codice) => codice ? (pianoConti.find(c => c.codice === codice)?.descrizione || codice) : null;
+  const righe = [
+    ...movBanca.map(m => ({ ...m, tabella: 'movimenti_bancari', fonte: m.banca || 'Banca', importo: Number(m.dare || m.avere || 0) })),
+    ...movCarta.map(m => ({ ...m, tabella: 'movimenti_carta', fonte: m.carta || 'Carta', importo: Number(m.importo || 0) })),
+  ].map(r => ({ ...r, contoDescrizione: descrizioneConto(r.codice_conto) }));
+
+  const totalePerConto = {};
+  righe.forEach(r => {
+    const chiave = r.contoDescrizione || '(nessun conto - segnato prima di questa funzione)';
+    totalePerConto[chiave] = (totalePerConto[chiave] || 0) + r.importo;
+  });
+  const riepilogoConti = Object.entries(totalePerConto).sort((a, b) => b[1] - a[1]);
+
+  renderTable('accontiInAttesaTable', [
+    { key: 'data_operazione', label: 'Data', type: 'date' },
+    { key: 'fonte', label: 'Fonte', type: 'select' },
+    { key: 'descrizione', label: 'Descrizione' },
+    { key: 'contoDescrizione', label: 'Conto', type: 'select', get: r => r.contoDescrizione || '' },
+    { key: 'nota_acconto', label: 'Nota' },
+    { key: 'importo', label: 'Importo', numeric: true, type: 'number' },
+    { key: 'azione', label: '' },
+  ], righe, {
+    defaultSort: 'data_operazione', defaultSortDir: -1,
+    renderRows: (rows) => rows.length ? rows.map(r => `
+      <tr>
+        <td>${fmtDate(r.data_operazione)}</td>
+        <td>${r.fonte}</td>
+        <td style="white-space:normal; max-width:360px;">${r.descrizione || ''}</td>
+        <td>${r.contoDescrizione || '<span class="muted">(nessuno)</span>'}</td>
+        <td style="white-space:normal; max-width:220px;">${(r.nota_acconto || '').replace(/</g, '&lt;')}</td>
+        <td class="num">${fmtEUR(r.importo)}</td>
+        <td style="white-space:nowrap;">
+          <button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" data-acconto-collega-tabella="${r.tabella}" data-acconto-collega-id="${r.id}" data-acconto-collega-descr="${(r.descrizione || '').replace(/"/g, '&quot;')}">&#128279; Collega a fattura</button>
+          <button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" data-acconto-annulla-tabella="${r.tabella}" data-acconto-annulla-id="${r.id}">Annulla</button>
+        </td>
+      </tr>`).join('') : `<tr><td colspan="7" class="muted" style="padding:14px;">Nessun acconto in attesa: tutti i movimenti segnati "in attesa fattura" sono gia' stati collegati.</td></tr>`,
+    afterRender: (container) => {
+      container.querySelectorAll('[data-acconto-collega-tabella]').forEach(btn => {
+        btn.addEventListener('click', () => apriModaleCollega(btn.dataset.accontoCollegaTabella, btn.dataset.accontoCollegaId, btn.dataset.accontoCollegaDescr, loadAccontiInAttesa));
+      });
+      container.querySelectorAll('[data-acconto-annulla-tabella]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Togliere il flag "Acconto in attesa fattura"? Viene tolto anche il conto assegnato tramite questa funzione: il movimento torna tra quelli da categorizzare.')) return;
+          const { error } = await supabase.from(btn.dataset.accontoAnnullaTabella).update({ nota_acconto: null, codice_conto: null }).eq('id', btn.dataset.accontoAnnullaId);
+          if (error) { alert('Errore: ' + error.message); return; }
+          loadAccontiInAttesa();
+        });
+      });
+    },
+  });
+
+  const totale = righe.reduce((s, r) => s + r.importo, 0);
+  statusEl.textContent = `${righe.length} movimenti in attesa · totale € ${fmtEUR(totale)}` +
+    (riepilogoConti.length ? ' · ' + riepilogoConti.map(([nome, tot]) => `${nome}: € ${fmtEUR(tot)}`).join(' · ') : '');
+}
+document.getElementById('btnRefreshAccontiInAttesa').addEventListener('click', loadAccontiInAttesa);
 
 document.getElementById('btnRiconciliaTutto').addEventListener('click', async () => {
   const btn = document.getElementById('btnRiconciliaTutto');
