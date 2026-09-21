@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 172</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 173</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -2616,6 +2616,14 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
 
   function renderModale(risultati, linkAttuali) {
     if (meGen !== modaleCollegaGen) return;
+    // per "Segna come pagamento su apertura conferimento": serve sapere a quale fornitore attribuire
+    // l'acconto sul debito ereditato dalla ditta individuale. Si ricava dai risultati di ricerca gia'
+    // a schermo (un solo fornitore alla volta, mai con "mostra tutte" che mischia fornitori diversi) -
+    // niente di nuovo da cercare, la ricerca per nome fornitore la fa gia' esistere qui.
+    const pivaAperturaTrovate = [...new Set((risultati || []).map(f => f.fornitore_piva).filter(Boolean))];
+    const fornitoreApertura = pivaAperturaTrovate.length === 1
+      ? { piva: pivaAperturaTrovate[0], nome: (risultati.find(f => f.fornitore_piva === pivaAperturaTrovate[0]) || {}).fornitore_denominazione || '' }
+      : null;
     content.innerHTML = `
       <div id="collegaStickyTop" style="position:sticky; top:0; z-index:5; background:var(--card); padding-bottom:6px;">
       <h2>Collega a una o piu' fatture o notule</h2>
@@ -2631,6 +2639,18 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
           <p class="muted" style="margin:0; font-size:11px;">Seleziona il conto transitorio (es. "Acconti a fornitori" o "Acconti da clienti"): il movimento viene registrato subito su quel conto, cosi' compare nel suo mastrino, invece di restare senza categoria in attesa della fattura. Quando la fattura arriva, usa "Collega" su questo stesso movimento: il conto assegnato qui viene tolto automaticamente e sostituito dal collegamento alla fattura.</p>
           <div id="segnaAccontoStatus" style="font-size:12px; margin-top:4px;"></div>
         </div>
+      </div>
+      <div style="margin:6px 0 10px;">
+        ${fornitoreApertura ? `
+        <a href="#" id="segnaAperturaToggle" style="font-size:12px;">Segna come pagamento su saldo di apertura conferimento (${(fornitoreApertura.nome || '').replace(/</g, '&lt;')})</a>
+        <div id="segnaAperturaForm" style="display:none; margin-top:6px; padding:8px; background:var(--bg-soft,#f4f4f2); border-radius:6px;">
+          <div style="display:flex; gap:8px; margin-bottom:6px; flex-wrap:wrap; align-items:center;">
+            <input type="text" id="segnaAperturaNota" placeholder="Nota (facoltativa)" style="flex:1; min-width:200px; padding:6px;">
+            <button type="button" class="btn secondary" id="segnaAperturaConferma">Conferma</button>
+          </div>
+          <p class="muted" style="margin:0; font-size:11px;">Per il debito ereditato dalla ditta individuale al momento del conferimento in SRL (04/05/2021), non collegato a nessuna fattura vera. Registra questo movimento come acconto sul saldo di apertura di ${(fornitoreApertura.nome || '').replace(/</g, '&lt;')} (visibile nel suo Mastrino Fornitori) e chiude il movimento senza collegarlo a nulla.</p>
+          <div id="segnaAperturaStatus" style="font-size:12px; margin-top:4px;"></div>
+        </div>` : `<span class="muted" style="font-size:11px;" title="Serve prima una ricerca per nome di un unico fornitore (non 'mostra tutte'), per sapere a chi attribuire l'acconto">Per segnare un pagamento su saldo di apertura conferimento, cerca prima il fornitore per nome qui sopra.</span>`}
       </div>
       ${linkAttuali.length ? `
         <h3 style="margin-top:14px;">Fatture gia' collegate a questo movimento</h3>
@@ -2876,6 +2896,34 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
       if (onSalvato) onSalvato();
       chiudiModaleCollega();
     });
+    const segnaAperturaToggle = document.getElementById('segnaAperturaToggle');
+    if (segnaAperturaToggle) segnaAperturaToggle.addEventListener('click', (e) => {
+      e.preventDefault();
+      const form = document.getElementById('segnaAperturaForm');
+      form.style.display = form.style.display === 'none' ? 'block' : 'none';
+      posizionaStickyCollega();
+    });
+    const segnaAperturaConferma = document.getElementById('segnaAperturaConferma');
+    if (segnaAperturaConferma) segnaAperturaConferma.addEventListener('click', async () => {
+      const statusEl = document.getElementById('segnaAperturaStatus');
+      if (!fornitoreApertura) return;
+      const nota = document.getElementById('segnaAperturaNota').value.trim();
+      // due scritture separate: la riga sul saldo di apertura (per il Mastrino Fornitori, vedi
+      // pagamenti_apertura_fornitori) e la chiusura del movimento stesso (riconciliato + nota, stesso
+      // meccanismo di "Ditta vecchia"/"Escludi" - non e' collegato a nessuna fattura vera)
+      const { error: errApertura } = await supabase.from('pagamenti_apertura_fornitori').insert({
+        azienda: AZIENDA_SCRITTURA, fornitore_piva: fornitoreApertura.piva,
+        data: movimentoData, importo: movimentoImporto, nota: nota || null,
+      });
+      if (errApertura) { statusEl.textContent = 'Errore: ' + errApertura.message; statusEl.style.color = '#b00'; return; }
+      const { error: errMov } = await supabase.from(tabella).update({
+        riconciliato: true, codice_conto: null,
+        nota_acconto: `Acconto su apertura conferimento (${fornitoreApertura.nome})${nota ? ' - ' + nota : ''}`,
+      }).eq('id', rigaId);
+      if (errMov) { statusEl.textContent = 'Errore: ' + errMov.message; statusEl.style.color = '#b00'; return; }
+      if (onSalvato) onSalvato();
+      chiudiModaleCollega();
+    });
     content.querySelectorAll('[data-scollega-link-id]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const { error } = await supabase.from('pagamenti_fatture').delete().eq('id', btn.dataset.scollegaLinkId);
@@ -3108,7 +3156,7 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
     const linkAttuali = await caricaLinkAttuali();
     if (!term && !mostraTutte) { renderModale([], linkAttuali); return; }
     const parole = term.split(/\s+/).filter(Boolean);
-    let q = supabase.from('fatture').select('id,numero,data,importo_totale,fornitore_denominazione,tipo_documento,pagato_altro,pagato_altro_note').in('azienda', AZIENDE_LETTURA);
+    let q = supabase.from('fatture').select('id,numero,data,importo_totale,fornitore_denominazione,fornitore_piva,tipo_documento,pagato_altro,pagato_altro_note').in('azienda', AZIENDE_LETTURA);
     // le notule (compensi agli incaricati vendita porta a porta) si cercano insieme alle fatture e si
     // collegano con lo stesso meccanismo N:N (pagamenti_fatture.fattura_tipo='notula'): serve perche'
     // un bonifico puo' saldare piu' notule insieme ("Saldo Notule 7 e 8") o una notula arrivare in piu'
