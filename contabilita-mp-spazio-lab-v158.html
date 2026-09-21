@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 156</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 158</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -5165,7 +5165,7 @@ async function loadVerificaRiconciliazioni() {
         <td class="num">${fmtEUR(r.allocato)}</td>
         <td class="num dare">${fmtEUR(r.residuo)}</td>
         <td><button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" data-completa-tabella="${r.tabella}" data-completa-id="${r.id}" data-completa-descr="${(r.descrizione || '').replace(/"/g, '&quot;')}">&#128279; Completa collegamento</button></td>
-      </tr>`).join('') : `<tr><td colspan="7" class="muted" style="padding:14px;">Nessun movimento parzialmente collegato: tutto cio' che ha un pagamento risulta o completamente allocato o senza nessun collegamento.</td></tr>`,
+      </tr>`) : [`<tr><td colspan="7" class="muted" style="padding:14px;">Nessun movimento parzialmente collegato: tutto cio' che ha un pagamento risulta o completamente allocato o senza nessun collegamento.</td></tr>`],
     afterRender: (container) => {
       container.querySelectorAll('[data-completa-tabella]').forEach(btn => {
         btn.addEventListener('click', () => apriModaleCollega(btn.dataset.completaTabella, btn.dataset.completaId, btn.dataset.completaDescr, loadVerificaRiconciliazioni));
@@ -5205,7 +5205,7 @@ async function loadVerificaRiconciliazioni() {
         <td>n. ${r.nc.numero} del ${fmtDate(r.nc.data)}</td>
         <td class="num">${fmtEUR(r.fattura.importo_totale)}</td>
         <td><button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" data-segna-compensata="${r.fattura.id}" data-segna-importo="${r.fattura.importo_totale}">Segna come compensata</button></td>
-      </tr>`).join('') : `<tr><td colspan="5" class="muted" style="padding:14px;">Nessuna coppia fattura/nota di credito sospetta trovata.</td></tr>`,
+      </tr>`) : [`<tr><td colspan="5" class="muted" style="padding:14px;">Nessuna coppia fattura/nota di credito sospetta trovata.</td></tr>`],
     afterRender: (container) => {
       container.querySelectorAll('[data-segna-compensata]').forEach(btn => {
         btn.addEventListener('click', async () => {
@@ -5248,7 +5248,7 @@ async function loadVerificaRiconciliazioni() {
         <td class="num">${fmtEUR(r.fatturato)}</td>
         <td class="num">${fmtEUR(r.pagato)}</td>
         <td class="num avere">${fmtEUR(r.saldo)}</td>
-      </tr>`).join('') : `<tr><td colspan="4" class="muted" style="padding:14px;">Nessun fornitore con saldo anomalo.</td></tr>`,
+      </tr>`) : [`<tr><td colspan="4" class="muted" style="padding:14px;">Nessun fornitore con saldo anomalo.</td></tr>`],
   });
 
   document.getElementById('verificaStatus').textContent =
@@ -5263,6 +5263,18 @@ document.getElementById('btnRefreshVerifica').addEventListener('click', loadVeri
 async function loadAccontiInAttesa() {
   const statusEl = document.getElementById('accontiInAttesaStatus');
   statusEl.textContent = 'Caricamento...';
+  try {
+    await loadAccontiInAttesaInterno(statusEl);
+  } catch (e) {
+    // qualunque eccezione qui prima lasciava la scritta "Caricamento..." bloccata per sempre, senza
+    // nessun indizio del perche' (successo davvero: renderRows restituiva una stringa gia' unita con
+    // .join(''), ma renderTable chiama bodyRows.join('') sul risultato aspettandosi un array - vedi
+    // fix sotto. Il try/catch resta comunque utile per qualunque altro errore futuro)
+    console.error('loadAccontiInAttesa:', e);
+    statusEl.textContent = 'Errore imprevisto: ' + (e && e.message ? e.message : e);
+  }
+}
+async function loadAccontiInAttesaInterno(statusEl) {
   const [{ data: movBanca, error: errMB }, { data: movCarta, error: errMC }] = await Promise.all([
     fetchTutteLeRighe(() => supabase.from('movimenti_bancari')
       .select('id,data_operazione,descrizione,dare,avere,codice_conto,nota_acconto,banca')
@@ -5308,7 +5320,7 @@ async function loadAccontiInAttesa() {
           <button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" data-acconto-collega-tabella="${r.tabella}" data-acconto-collega-id="${r.id}" data-acconto-collega-descr="${(r.descrizione || '').replace(/"/g, '&quot;')}">&#128279; Collega a fattura</button>
           <button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" data-acconto-annulla-tabella="${r.tabella}" data-acconto-annulla-id="${r.id}">Annulla</button>
         </td>
-      </tr>`).join('') : `<tr><td colspan="7" class="muted" style="padding:14px;">Nessun acconto in attesa: tutti i movimenti segnati "in attesa fattura" sono gia' stati collegati.</td></tr>`,
+      </tr>`) : [`<tr><td colspan="7" class="muted" style="padding:14px;">Nessun acconto in attesa: tutti i movimenti segnati "in attesa fattura" sono gia' stati collegati.</td></tr>`],
     afterRender: (container) => {
       container.querySelectorAll('[data-acconto-collega-tabella]').forEach(btn => {
         btn.addEventListener('click', () => apriModaleCollega(btn.dataset.accontoCollegaTabella, btn.dataset.accontoCollegaId, btn.dataset.accontoCollegaDescr, loadAccontiInAttesa));
