@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 160</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 161</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -2569,6 +2569,9 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
   // fatture dello stesso fornitore): questo set tiene le fatture spuntate nella tabella di ricerca
   // finche' non si clicca "Collega selezionate", cosi' si vede il totale prima di confermare
   let selezionati = new Set();
+  // ordine in cui le caselle sono state spuntate (non l'ordine di tabella, che dipende
+  // dall'ordinamento corrente - vedi il commento in ricalcolaDefaultImporti piu' sotto)
+  let ordineSpuntaCollega = [];
   // di default si nascondono le fatture gia' interamente pagate: un fornitore ricorrente (es.
   // carburante) puo' avere decine di fatture "Gia' pagata" nella stessa ricerca per nome, che
   // affollano la lista e nascondono in fondo quelle davvero "Aperta" da collegare
@@ -2909,23 +2912,35 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
       return content.querySelector(`.collega-importo-input[data-for-id="${checkId}"]`);
     }
     // Il valore proposto per una fattura appena spuntata e' il suo residuo, ma capato a quanto resta
-    // ancora libero del movimento (movimento meno le fatture/NC gia' spuntate prima, in ordine): utile
-    // per pagare piu' fatture in sequenza con un unico bonifico (es. criterio FIFO, prima la piu'
-    // vecchia) senza dover ricalcolare a mano quanto avanza per la successiva. Resta comunque
-    // modificabile: se il valore proposto non e' quello giusto lo si corregge subito a vista, non
-    // sparisce nulla. Il valore si "fissa" (flag editedByUser) appena proposto, cosi' spuntarne
-    // un'altra dopo non lo tocca piu' retroattivamente.
+    // ancora libero del movimento (movimento meno le fatture/NC gia' spuntate prima): utile per pagare
+    // piu' fatture in sequenza con un unico bonifico (es. criterio FIFO, prima la piu' vecchia) senza
+    // dover ricalcolare a mano quanto avanza per la successiva. Resta comunque modificabile: se il
+    // valore proposto non e' quello giusto lo si corregge subito a vista, non sparisce nulla. Il
+    // valore si "fissa" (flag editedByUser) appena proposto, cosi' spuntarne un'altra dopo non lo
+    // tocca piu' retroattivamente.
+    //
+    // La ripartizione segue ordineSpuntaCollega (l'ordine in cui l'utente ha spuntato le caselle), MAI
+    // l'ordine delle righe in tabella: la tabella e' ordinata per data decrescente di default, quindi
+    // una fattura piu' recente puo' comparire sopra una piu' vecchia. Bug osservato: spuntando prima
+    // la fattura vecchia (proposta correttamente a scendere) e poi quella piu' recente sopra di lei in
+    // tabella, il giro in ordine di tabella dava alla piu' recente la precedenza sul budget, lasciando
+    // quella vecchia (gia' "fissata" prima) con un importo che sommato sforava il movimento.
     function ricalcolaDefaultImporti() {
-      let residuoMovimento = movimentoImporto;
       for (const chk of content.querySelectorAll('.collega-check')) {
         const input = inputImportoDi(chk.dataset.checkId);
         if (!input) continue;
         if (!chk.checked) {
           input.disabled = true;
           if (chk.dataset.checkNc !== '1') input.dataset.editedByUser = '';
-          continue;
+        } else {
+          input.disabled = false;
         }
-        input.disabled = false;
+      }
+      let residuoMovimento = movimentoImporto;
+      for (const id of ordineSpuntaCollega) {
+        const chk = content.querySelector(`.collega-check[data-check-id="${id}"]`);
+        const input = inputImportoDi(id);
+        if (!chk || !chk.checked || !input) continue;
         const segno = chk.dataset.checkNc === '1' ? -1 : 1;
         if (chk.dataset.checkNc === '1' || input.dataset.editedByUser === '1') {
           residuoMovimento -= segno * (Number(input.value) || 0);
@@ -3007,9 +3022,13 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
     });
     content.querySelectorAll('.collega-check').forEach(chk => {
       chk.addEventListener('change', () => {
-        if (chk.checked) selezionati.add(chk.dataset.checkId); else selezionati.delete(chk.dataset.checkId);
-        // una casella deselezionata torna a proporre il default automatico se venisse rispuntata
-        if (!chk.checked) {
+        if (chk.checked) {
+          selezionati.add(chk.dataset.checkId);
+          if (!ordineSpuntaCollega.includes(chk.dataset.checkId)) ordineSpuntaCollega.push(chk.dataset.checkId);
+        } else {
+          selezionati.delete(chk.dataset.checkId);
+          ordineSpuntaCollega = ordineSpuntaCollega.filter(id => id !== chk.dataset.checkId);
+          // una casella deselezionata torna a proporre il default automatico se venisse rispuntata
           const input = inputImportoDi(chk.dataset.checkId);
           if (input) delete input.dataset.editedByUser;
         }
