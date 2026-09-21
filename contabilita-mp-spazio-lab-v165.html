@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 164</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 165</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -5364,15 +5364,18 @@ async function loadAccontiInAttesaInterno(statusEl) {
   }
 
   const righe = [
+    // banca ha dare/avere separati (uscita/entrata); la carta e' sempre una spesa (uscita) - non
+    // esiste un accredito su una carta di credito aziendale in questo dataset (stessa distinzione
+    // gia' fatta in "Da Assegnare")
     ...movBanca.map(m => {
       const importo = Number(m.dare || m.avere || 0);
       const cls = classifica(m, importo);
-      return cls && { ...m, tabella: 'movimenti_bancari', fonte: m.banca || 'Banca', importo, contoDescrizione: descrizioneConto(m.codice_conto), ...cls };
+      return cls && { ...m, tabella: 'movimenti_bancari', fonte: m.banca || 'Banca', importo, direzione: m.dare ? 'uscita' : 'entrata', contoDescrizione: descrizioneConto(m.codice_conto), ...cls };
     }),
     ...(movCarta || []).map(m => {
       const importo = Number(m.importo || 0);
       const cls = classifica(m, importo);
-      return cls && { ...m, tabella: 'movimenti_carta', fonte: m.carta || 'Carta', importo, contoDescrizione: descrizioneConto(m.codice_conto), ...cls };
+      return cls && { ...m, tabella: 'movimenti_carta', fonte: m.carta || 'Carta', importo, direzione: 'uscita', contoDescrizione: descrizioneConto(m.codice_conto), ...cls };
     }),
   ].filter(Boolean);
 
@@ -5380,6 +5383,7 @@ async function loadAccontiInAttesaInterno(statusEl) {
     { key: 'sel', label: '' },
     { key: 'data_operazione', label: 'Data', type: 'date' },
     { key: 'fonte', label: 'Fonte', type: 'select' },
+    { key: 'direzione', label: 'Direzione', type: 'select', get: r => r.direzione === 'entrata' ? 'Entrata' : 'Uscita' },
     { key: 'tipoLabel', label: 'Tipo', type: 'select' },
     { key: 'descrizione', label: 'Descrizione' },
     { key: 'contoDescrizione', label: 'Conto', type: 'select', get: r => r.contoDescrizione || '' },
@@ -5394,6 +5398,7 @@ async function loadAccontiInAttesaInterno(statusEl) {
         <td>${r.tipo === 'nuovo' ? `<input type="checkbox" class="accpnti-riga-check" data-riga-chiave="${chiaveSel}" ${accontiSelezionate.has(chiaveSel) ? 'checked' : ''}>` : ''}</td>
         <td>${fmtDate(r.data_operazione)}</td>
         <td>${r.fonte}</td>
+        <td><span class="pill" style="background:${r.direzione === 'entrata' ? '#d9ead0' : '#f5d9d9'};">${r.direzione === 'entrata' ? 'Entrata' : 'Uscita'}</span></td>
         <td><span class="pill" style="${r.tipo === 'parziale' ? 'background:#fbe8b0;' : r.tipo === 'acconto' ? 'background:#dce6f5;' : ''}" ${r.tipo === 'parziale' ? `title="Residuo ancora da coprire: € ${fmtEUR(r.residuo)}"` : ''}>${r.tipoLabel}</span></td>
         <td style="white-space:normal; max-width:340px;">${r.descrizione || ''}${r.nota_acconto ? ` <span class="muted" title="${r.nota_acconto.replace(/"/g, '&quot;')}">(${r.nota_acconto})</span>` : ''}</td>
         <td>${r.contoDescrizione || '<span class="muted">(nessuno)</span>'}</td>
@@ -5404,7 +5409,7 @@ async function loadAccontiInAttesaInterno(statusEl) {
           ${r.tipo === 'nuovo' ? `<button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" title="Movimento dell'attivita' individuale precedente al conferimento in SRL: non riguarda nessuna fattura di questa azienda" data-vecchia-ditta-tabella="${r.tabella}" data-vecchia-ditta-id="${r.id}">Ditta vecchia</button>` : ''}
         </td>
       </tr>`;
-    }) : [`<tr><td colspan="8" class="muted" style="padding:14px;">Niente da abbinare: tutti i movimenti sono riconciliati o gia' categorizzati.</td></tr>`],
+    }) : [`<tr><td colspan="9" class="muted" style="padding:14px;">Niente da abbinare: tutti i movimenti sono riconciliati o gia' categorizzati.</td></tr>`],
     afterRender: (container, filtered) => {
       // solo le righe "Da collegare" sono selezionabili (stessa restrizione del bottone per riga):
       // e' l'insieme su cui agisce "Seleziona tutte le righe filtrate", ricalcolato a ogni filtro/ordinamento
