@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 177</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 178</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -608,6 +608,7 @@
       </div>
       <div id="aggiungiAperturaForm" style="display:none; margin:0 0 10px; padding:8px; background:var(--bg-soft,#f4f4f2); border-radius:6px;">
         <div style="display:flex; gap:8px; margin-bottom:6px; flex-wrap:wrap; align-items:center;">
+          <input type="text" id="aggiungiAperturaPiva" placeholder="P.IVA/CF fornitore" style="width:160px; padding:6px;" title="Precompilata dal fornitore selezionato sopra, ma scrivibile a mano: copiala da 'Clienti e Fornitori' se il fornitore selezionato non e' quello giusto o non si trova in tendina">
           <select id="aggiungiAperturaTipo">
             <option value="debito">Debito di apertura (aumenta quanto dovuto, Avere)</option>
             <option value="pagamento">Acconto su apertura (riduce il debito, Dare)</option>
@@ -617,7 +618,7 @@
           <input type="text" id="aggiungiAperturaNota" placeholder="Nota (facoltativa)" style="flex:1; min-width:180px; padding:6px;">
           <button type="button" class="btn secondary" id="aggiungiAperturaConferma">Aggiungi</button>
         </div>
-        <p class="muted" style="margin:0; font-size:11px;">Per il fornitore selezionato sopra. Usa "Debito di apertura" per un importo ereditato dalla ditta individuale mai fatturato in questo sistema; "Acconto su apertura" per un pagamento che lo riduce (es. un bonifico senza fattura corrispondente). Non tocca nessun movimento bancario: se questo importo corrisponde a un bonifico specifico, chiudilo separatamente da "Movimenti Bancari" (Escludi o Ditta vecchia) per non farlo restare tra i "da riconciliare".</p>
+        <p class="muted" style="margin:0; font-size:11px;">La P.IVA/CF si precompila dal fornitore selezionato sopra, ma e' scrivibile a mano: se il fornitore non compare in tendina (o compare con un saldo che non torna, segno di una P.IVA salvata in formato diverso da fattura a fattura), copiala esatta dalla colonna "P.IVA / CF" della tab "Clienti e Fornitori" e incollala qui. Usa "Debito di apertura" per un importo ereditato dalla ditta individuale mai fatturato in questo sistema; "Acconto su apertura" per un pagamento che lo riduce (es. un bonifico senza fattura corrispondente). Non tocca nessun movimento bancario: se questo importo corrisponde a un bonifico specifico, chiudilo separatamente da "Movimenti Bancari" (Escludi o Ditta vecchia) per non farlo restare tra i "da riconciliare".</p>
         <div id="aggiungiAperturaStatus" style="font-size:12px; margin-top:4px;"></div>
       </div>
       <div class="table-wrap"><div id="mastriniFornitoriTable"></div></div>
@@ -7173,12 +7174,22 @@ document.getElementById('btnRefreshMastriniFornitori').addEventListener('click',
 document.getElementById('aggiungiAperturaToggle').addEventListener('click', (e) => {
   e.preventDefault();
   const form = document.getElementById('aggiungiAperturaForm');
-  form.style.display = form.style.display === 'none' ? 'block' : 'none';
+  const apertura = form.style.display === 'none';
+  form.style.display = apertura ? 'block' : 'none';
+  // precompila dalla tendina, ma resta modificabile a mano (vedi commento sopra sul formato P.IVA
+  // incoerente fra fatture vecchie e nuove)
+  if (apertura) {
+    const pivaInput = document.getElementById('aggiungiAperturaPiva');
+    if (!pivaInput.value) pivaInput.value = document.getElementById('mastriniFornitoreSel').value || '';
+  }
+});
+document.getElementById('mastriniFornitoreSel').addEventListener('change', () => {
+  document.getElementById('aggiungiAperturaPiva').value = document.getElementById('mastriniFornitoreSel').value || '';
 });
 document.getElementById('aggiungiAperturaConferma').addEventListener('click', async () => {
   const statusEl = document.getElementById('aggiungiAperturaStatus');
-  const key = document.getElementById('mastriniFornitoreSel').value;
-  if (!key) { statusEl.textContent = 'Seleziona prima un fornitore dalla tendina qui sopra.'; statusEl.style.color = '#b00'; return; }
+  const piva = document.getElementById('aggiungiAperturaPiva').value.trim();
+  if (!piva) { statusEl.textContent = 'Inserisci la P.IVA/CF del fornitore (copiala da "Clienti e Fornitori" se serve).'; statusEl.style.color = '#b00'; return; }
   const tipo = document.getElementById('aggiungiAperturaTipo').value;
   const data = document.getElementById('aggiungiAperturaData').value;
   const importo = Number(document.getElementById('aggiungiAperturaImporto').value) || 0;
@@ -7187,12 +7198,17 @@ document.getElementById('aggiungiAperturaConferma').addEventListener('click', as
   if (importo <= 0) { statusEl.textContent = 'Inserisci un importo maggiore di zero.'; statusEl.style.color = '#b00'; return; }
   const tabellaApertura = tipo === 'debito' ? 'saldi_apertura_fornitori' : 'pagamenti_apertura_fornitori';
   const { error } = await supabase.from(tabellaApertura).insert({
-    azienda: AZIENDA_SCRITTURA, fornitore_piva: key, data, importo, nota: nota || null,
+    azienda: AZIENDA_SCRITTURA, fornitore_piva: piva, data, importo, nota: nota || null,
   });
   if (error) { statusEl.textContent = 'Errore: ' + error.message; statusEl.style.color = '#b00'; return; }
   document.getElementById('aggiungiAperturaImporto').value = '';
   document.getElementById('aggiungiAperturaNota').value = '';
   statusEl.textContent = '';
+  // se la P.IVA scritta a mano corrisponde a un'opzione gia' in tendina la seleziona, cosi' il
+  // mastrino che si ricarica sotto e' subito quello giusto; se non corrisponde (formato diverso da
+  // quello delle fatture) il valore resta quello di prima - va bene comunque, la riga e' stata scritta
+  const sel = document.getElementById('mastriniFornitoreSel');
+  if ([...sel.options].some(o => o.value === piva)) sel.value = piva;
   loadMastriniFornitoreRows();
 });
 
