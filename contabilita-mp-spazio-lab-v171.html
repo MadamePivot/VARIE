@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 170</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 171</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -5389,9 +5389,9 @@ async function loadAccontiInAttesaInterno(statusEl) {
     { key: 'direzione', label: 'Direzione', type: 'select', get: r => r.direzione === 'entrata' ? 'Entrata' : 'Uscita' },
     { key: 'tipoLabel', label: 'Tipo', type: 'select' },
     { key: 'descrizione', label: 'Descrizione' },
-    { key: 'contoDescrizione', label: 'Conto', type: 'select', get: r => r.contoDescrizione || '' },
     { key: 'importo', label: 'Importo', numeric: true, type: 'number' },
     { key: 'azione', label: '' },
+    { key: 'contoDescrizione', label: 'Conto', type: 'select', get: r => r.contoDescrizione || '' },
   ], righe, {
     defaultSort: 'data_operazione', defaultSortDir: -1,
     renderRows: (rows) => rows.length ? rows.map(r => {
@@ -5404,9 +5404,6 @@ async function loadAccontiInAttesaInterno(statusEl) {
         <td><span class="pill" style="background:${r.direzione === 'entrata' ? '#d9ead0' : '#f5d9d9'};">${r.direzione === 'entrata' ? 'Entrata' : 'Uscita'}</span></td>
         <td><span class="pill" style="${r.tipo === 'parziale' ? 'background:#fbe8b0;' : r.tipo === 'acconto' ? 'background:#dce6f5;' : ''}" ${r.tipo === 'parziale' ? `title="Residuo ancora da coprire: € ${fmtEUR(r.residuo)}"` : ''}>${r.tipoLabel}</span></td>
         <td style="white-space:normal; max-width:340px;">${r.descrizione || ''}${r.nota_acconto ? ` <span class="muted" title="${r.nota_acconto.replace(/"/g, '&quot;')}">(${r.nota_acconto})</span>` : ''}</td>
-        <td>${r.tipo === 'nuovo'
-          ? `<select class="inline-conto-abbinare" data-riga-tabella="${r.tabella}" data-riga-id="${r.id}" title="Assegna il conto direttamente, senza fattura (es. commissioni ricorrenti mai fatturate come Global Blue)">${contoOptionsHTML('')}</select>`
-          : (r.contoDescrizione || '<span class="muted">(nessuno)</span>')}</td>
         <td class="num">${fmtEUR(r.importo)}</td>
         <td style="white-space:nowrap;">
           <button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" data-acconto-collega-tabella="${r.tabella}" data-acconto-collega-id="${r.id}" data-acconto-collega-descr="${(r.descrizione || '').replace(/"/g, '&quot;')}">&#128279; Collega</button>
@@ -5415,6 +5412,9 @@ async function loadAccontiInAttesaInterno(statusEl) {
           <br>
           <button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px; margin-top:4px;" title="Collega questo movimento a una nota di credito (non a una fattura da pagare)" data-acconto-collega-nc-tabella="${r.tabella}" data-acconto-collega-nc-id="${r.id}" data-acconto-collega-nc-descr="${(r.descrizione || '').replace(/"/g, '&quot;')}">&#128279; Nota di credito</button>
         </td>
+        <td>${r.tipo === 'nuovo'
+          ? `<select class="inline-conto-abbinare" data-riga-tabella="${r.tabella}" data-riga-id="${r.id}" title="Assegna il conto direttamente, senza fattura (es. commissioni ricorrenti mai fatturate come Global Blue)">${contoOptionsHTML('')}</select>`
+          : (r.contoDescrizione || '<span class="muted">(nessuno)</span>')}</td>
       </tr>`;
     }) : [`<tr><td colspan="9" class="muted" style="padding:14px;">Niente da abbinare: tutti i movimenti sono riconciliati o gia' categorizzati.</td></tr>`],
     afterRender: (container, filtered) => {
