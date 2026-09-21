@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 176</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 177</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -602,6 +602,23 @@
         <button class="btn secondary" id="btnRefreshMastriniFornitori">Aggiorna</button>
         <label style="display:flex; align-items:center; gap:5px; font-size:13px;"><input type="checkbox" id="mastriniFornitoreNascondiZero" checked> Nascondi fornitori a saldo zero</label>
         <span class="muted" id="mastriniFornitoreSaldo"></span>
+      </div>
+      <div class="toolbar" style="flex-wrap:wrap;">
+        <a href="#" id="aggiungiAperturaToggle" style="font-size:12px;">+ Aggiungi movimento sul saldo di apertura (ditta individuale)</a>
+      </div>
+      <div id="aggiungiAperturaForm" style="display:none; margin:0 0 10px; padding:8px; background:var(--bg-soft,#f4f4f2); border-radius:6px;">
+        <div style="display:flex; gap:8px; margin-bottom:6px; flex-wrap:wrap; align-items:center;">
+          <select id="aggiungiAperturaTipo">
+            <option value="debito">Debito di apertura (aumenta quanto dovuto, Avere)</option>
+            <option value="pagamento">Acconto su apertura (riduce il debito, Dare)</option>
+          </select>
+          <input type="date" id="aggiungiAperturaData" style="padding:6px;">
+          <input type="number" step="0.01" id="aggiungiAperturaImporto" placeholder="Importo" style="width:110px; padding:6px;">
+          <input type="text" id="aggiungiAperturaNota" placeholder="Nota (facoltativa)" style="flex:1; min-width:180px; padding:6px;">
+          <button type="button" class="btn secondary" id="aggiungiAperturaConferma">Aggiungi</button>
+        </div>
+        <p class="muted" style="margin:0; font-size:11px;">Per il fornitore selezionato sopra. Usa "Debito di apertura" per un importo ereditato dalla ditta individuale mai fatturato in questo sistema; "Acconto su apertura" per un pagamento che lo riduce (es. un bonifico senza fattura corrispondente). Non tocca nessun movimento bancario: se questo importo corrisponde a un bonifico specifico, chiudilo separatamente da "Movimenti Bancari" (Escludi o Ditta vecchia) per non farlo restare tra i "da riconciliare".</p>
+        <div id="aggiungiAperturaStatus" style="font-size:12px; margin-top:4px;"></div>
       </div>
       <div class="table-wrap"><div id="mastriniFornitoriTable"></div></div>
     </div>
@@ -7147,6 +7164,37 @@ async function loadMastriniFornitoreRows() {
 }
 document.getElementById('mastriniFornitoreSel').addEventListener('change', loadMastriniFornitoreRows);
 document.getElementById('btnRefreshMastriniFornitori').addEventListener('click', loadMastriniFornitoreRows);
+
+// inserimento diretto sul saldo di apertura (debito ereditato dalla ditta individuale, o un acconto
+// che lo riduce): richiesto dall'utente perche' l'individuazione automatica del fornitore dentro il
+// modale Collega (basata sulla P.IVA unica tra i risultati di ricerca) non sempre funziona (es. piu'
+// fornitori con lo stesso nome ma P.IVA diversa) - qui il fornitore e' gia' scelto senza ambiguita'
+// dalla tendina sopra, stesso principio delle altre righe del mastrino ("gestisco come gli altri")
+document.getElementById('aggiungiAperturaToggle').addEventListener('click', (e) => {
+  e.preventDefault();
+  const form = document.getElementById('aggiungiAperturaForm');
+  form.style.display = form.style.display === 'none' ? 'block' : 'none';
+});
+document.getElementById('aggiungiAperturaConferma').addEventListener('click', async () => {
+  const statusEl = document.getElementById('aggiungiAperturaStatus');
+  const key = document.getElementById('mastriniFornitoreSel').value;
+  if (!key) { statusEl.textContent = 'Seleziona prima un fornitore dalla tendina qui sopra.'; statusEl.style.color = '#b00'; return; }
+  const tipo = document.getElementById('aggiungiAperturaTipo').value;
+  const data = document.getElementById('aggiungiAperturaData').value;
+  const importo = Number(document.getElementById('aggiungiAperturaImporto').value) || 0;
+  const nota = document.getElementById('aggiungiAperturaNota').value.trim();
+  if (!data) { statusEl.textContent = 'Inserisci una data.'; statusEl.style.color = '#b00'; return; }
+  if (importo <= 0) { statusEl.textContent = 'Inserisci un importo maggiore di zero.'; statusEl.style.color = '#b00'; return; }
+  const tabellaApertura = tipo === 'debito' ? 'saldi_apertura_fornitori' : 'pagamenti_apertura_fornitori';
+  const { error } = await supabase.from(tabellaApertura).insert({
+    azienda: AZIENDA_SCRITTURA, fornitore_piva: key, data, importo, nota: nota || null,
+  });
+  if (error) { statusEl.textContent = 'Errore: ' + error.message; statusEl.style.color = '#b00'; return; }
+  document.getElementById('aggiungiAperturaImporto').value = '';
+  document.getElementById('aggiungiAperturaNota').value = '';
+  statusEl.textContent = '';
+  loadMastriniFornitoreRows();
+});
 
 /* ---------------- Saldi Fornitori ---------------- */
 
