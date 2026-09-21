@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 165</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 166</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -5407,6 +5407,8 @@ async function loadAccontiInAttesaInterno(statusEl) {
           <button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" data-acconto-collega-tabella="${r.tabella}" data-acconto-collega-id="${r.id}" data-acconto-collega-descr="${(r.descrizione || '').replace(/"/g, '&quot;')}">&#128279; Collega</button>
           ${r.tipo === 'acconto' ? `<button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" data-acconto-annulla-tabella="${r.tabella}" data-acconto-annulla-id="${r.id}">Annulla</button>` : ''}
           ${r.tipo === 'nuovo' ? `<button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" title="Movimento dell'attivita' individuale precedente al conferimento in SRL: non riguarda nessuna fattura di questa azienda" data-vecchia-ditta-tabella="${r.tabella}" data-vecchia-ditta-id="${r.id}">Ditta vecchia</button>` : ''}
+          <br>
+          <button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px; margin-top:4px;" title="Collega questo movimento a una nota di credito (non a una fattura da pagare)" data-acconto-collega-nc-tabella="${r.tabella}" data-acconto-collega-nc-id="${r.id}" data-acconto-collega-nc-descr="${(r.descrizione || '').replace(/"/g, '&quot;')}">&#128279; Nota di credito</button>
         </td>
       </tr>`;
     }) : [`<tr><td colspan="9" class="muted" style="padding:14px;">Niente da abbinare: tutti i movimenti sono riconciliati o gia' categorizzati.</td></tr>`],
@@ -5416,6 +5418,9 @@ async function loadAccontiInAttesaInterno(statusEl) {
       accontiUltimeFiltrateNuovo = filtered.filter(r => r.tipo === 'nuovo');
       container.querySelectorAll('[data-acconto-collega-tabella]').forEach(btn => {
         btn.addEventListener('click', () => apriModaleCollega(btn.dataset.accontoCollegaTabella, btn.dataset.accontoCollegaId, btn.dataset.accontoCollegaDescr, loadAccontiInAttesa));
+      });
+      container.querySelectorAll('[data-acconto-collega-nc-tabella]').forEach(btn => {
+        btn.addEventListener('click', () => apriModaleCollegaNotaCredito(btn.dataset.accontoCollegaNcTabella, btn.dataset.accontoCollegaNcId, btn.dataset.accontoCollegaNcDescr, loadAccontiInAttesa));
       });
       container.querySelectorAll('[data-acconto-annulla-tabella]').forEach(btn => {
         btn.addEventListener('click', async () => {
