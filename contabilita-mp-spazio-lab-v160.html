@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 159</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 160</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -268,8 +268,8 @@
 
   <section id="tab-accontiInAttesa">
     <div class="card">
-      <h2>Acconti in attesa</h2>
-      <p class="muted">Tutti i movimenti (banca + carta) segnati "acconto in attesa fattura" dal modale Collega, in un unico elenco invece di doverli cercare uno per uno nei Mastrini. Ogni riga e' gia' registrata sul conto transitorio scelto al momento (visibile anche li'): da qui puoi collegarla direttamente alla fattura appena arriva, oppure annullare il flag se non serve piu'.</p>
+      <h2>Da Abbinare</h2>
+      <p class="muted">Tutti i movimenti (banca + carta) ancora non riconciliati per intero, in un unico elenco: quelli senza nessun collegamento, quelli collegati solo in parte (residuo ancora scoperto), e gli acconti segnati "in attesa fattura". Da qui riapri direttamente "Collega" su ciascuno, senza dover girare tra Movimenti Bancari, Verifica Riconciliazioni e Mastrini.</p>
       <div class="toolbar" style="flex-wrap:wrap;">
         <button class="btn secondary" id="btnRefreshAccontiInAttesa">Aggiorna</button>
         <span class="muted" id="accontiInAttesaStatus"></span>
@@ -851,7 +851,7 @@ const NAV = [
     { id: 'daAssegnare', label: 'Da Assegnare' },
     { id: 'righeDaAssegnare', label: 'Righe da Assegnare' },
     { id: 'verificaRiconciliazioni', label: 'Verifica Riconciliazioni' },
-    { id: 'accontiInAttesa', label: 'Acconti in attesa' },
+    { id: 'accontiInAttesa', label: 'Da Abbinare' },
   ]},
   { group: 'Fatture', items: [
     { id: 'acquisto', label: 'Fatture Acquisto' },
@@ -864,7 +864,7 @@ const NAV = [
   { group: 'Banca', items: [
     { id: 'movimenti', label: 'Movimenti Bancari' },
     { id: 'carta', label: 'Movimenti Carta' },
-    { id: 'accontiInAttesa', label: 'Acconti in attesa' },
+    { id: 'accontiInAttesa', label: 'Da Abbinare' },
     // sottomenu con una voce per banca e una per carta di credito (vedi caricaVociEstrattiSidebar):
     // tutte puntano alla stessa tab, che si filtra sulla voce scelta invece di avere una sezione per
     // ciascuna banca/carta (l'elenco cambia nel tempo, non ha senso hardcodarlo qui)
@@ -5283,35 +5283,66 @@ async function loadAccontiInAttesa() {
   }
 }
 async function loadAccontiInAttesaInterno(statusEl) {
-  const [{ data: movBanca, error: errMB }, { data: movCarta, error: errMC }] = await Promise.all([
+  const [{ data: movBancaGrezza, error: errMB }, { data: movCarta, error: errMC }] = await Promise.all([
     fetchTutteLeRighe(() => supabase.from('movimenti_bancari')
-      .select('id,data_operazione,descrizione,dare,avere,codice_conto,nota_acconto,banca')
-      .in('azienda', AZIENDE_LETTURA).eq('riconciliato', false).not('nota_acconto', 'is', null)),
+      .select('id,data_operazione,descrizione,categoria,dare,avere,codice_conto,nota_acconto,banca')
+      .in('azienda', AZIENDE_LETTURA).eq('riconciliato', false)),
     fetchTutteLeRighe(() => supabase.from('movimenti_carta')
       .select('id,data_operazione,descrizione,importo,codice_conto,nota_acconto,carta')
-      .in('azienda', AZIENDE_LETTURA).eq('riconciliato', false).not('nota_acconto', 'is', null)),
+      .in('azienda', AZIENDE_LETTURA).eq('riconciliato', false)),
   ]);
   if (errMB || errMC) { statusEl.textContent = 'Errore: ' + (errMB || errMC).message; return; }
 
-  const descrizioneConto = (codice) => codice ? (pianoConti.find(c => c.codice === codice)?.descrizione || codice) : null;
-  const righe = [
-    ...movBanca.map(m => ({ ...m, tabella: 'movimenti_bancari', fonte: m.banca || 'Banca', importo: Number(m.dare || m.avere || 0) })),
-    ...movCarta.map(m => ({ ...m, tabella: 'movimenti_carta', fonte: m.carta || 'Carta', importo: Number(m.importo || 0) })),
-  ].map(r => ({ ...r, contoDescrizione: descrizioneConto(r.codice_conto) }));
+  // stessa esclusione gia' fatta in "Da Assegnare": le righe cumulative RI.BA si risolvono solo
+  // caricando la quietanza (si scompongono da sole in righe singole), e il giroconto mensile Nexi non
+  // ha mai una fattura da collegare - proporle qui chiederebbe un'azione che non ha senso
+  const movBanca = (movBancaGrezza || []).filter(r => !/^ADD\.\s*RI\.BA/i.test(r.categoria || '') && (r.categoria || '').toUpperCase() !== 'SERVIZI NEXI');
 
-  const totalePerConto = {};
-  righe.forEach(r => {
-    const chiave = r.contoDescrizione || '(nessun conto - segnato prima di questa funzione)';
-    totalePerConto[chiave] = (totalePerConto[chiave] || 0) + r.importo;
-  });
-  const riepilogoConti = Object.entries(totalePerConto).sort((a, b) => b[1] - a[1]);
+  // quanto e' gia' allocato su ciascun movimento (per distinguere "mai collegato" da "collegato solo
+  // in parte"): stesso calcolo di Verifica Riconciliazioni, ma qui serve anche per la carta e a
+  // prescindere dal tipo fattura (acquisto/vendita), quindi si interroga senza quel filtro
+  const idsBanca = movBanca.map(r => r.id);
+  const idsCarta = (movCarta || []).map(r => r.id);
+  const [{ data: linkBanca }, { data: linkCarta }] = await Promise.all([
+    idsBanca.length ? fetchPerBlocchiDiId(idsBanca, ids => supabase.from('pagamenti_fatture').select('movimento_id,importo_allocato').eq('movimento_tabella', 'movimenti_bancari').in('movimento_id', ids)) : Promise.resolve({ data: [] }),
+    idsCarta.length ? fetchPerBlocchiDiId(idsCarta, ids => supabase.from('pagamenti_fatture').select('movimento_id,importo_allocato').eq('movimento_tabella', 'movimenti_carta').in('movimento_id', ids)) : Promise.resolve({ data: [] }),
+  ]);
+  const allocatoPerId = {};
+  [...(linkBanca || []), ...(linkCarta || [])].forEach(l => { allocatoPerId[l.movimento_id] = (allocatoPerId[l.movimento_id] || 0) + (Number(l.importo_allocato) || 0); });
+
+  const descrizioneConto = (codice) => codice ? (pianoConti.find(c => c.codice === codice)?.descrizione || codice) : null;
+
+  // tre situazioni che chiedono la stessa azione (riaprire "Collega"): mai collegato, collegato solo
+  // in parte, o parcheggiato su un conto acconti in attesa della fattura. Un movimento gia' assegnato
+  // direttamente a un conto normale (es. spese bancarie) non torna null qui: non ha bisogno di essere
+  // "abbinato" a nulla, quindi resta fuori da questo elenco.
+  function classifica(m, importo) {
+    const allocato = allocatoPerId[m.id] || 0;
+    if (allocato > 0.02) return { tipo: 'parziale', tipoLabel: 'Collegato solo in parte', residuo: importo - allocato };
+    if (m.nota_acconto) return { tipo: 'acconto', tipoLabel: 'Acconto in attesa fattura' };
+    if (m.codice_conto) return null;
+    return { tipo: 'nuovo', tipoLabel: 'Da collegare' };
+  }
+
+  const righe = [
+    ...movBanca.map(m => {
+      const importo = Number(m.dare || m.avere || 0);
+      const cls = classifica(m, importo);
+      return cls && { ...m, tabella: 'movimenti_bancari', fonte: m.banca || 'Banca', importo, contoDescrizione: descrizioneConto(m.codice_conto), ...cls };
+    }),
+    ...(movCarta || []).map(m => {
+      const importo = Number(m.importo || 0);
+      const cls = classifica(m, importo);
+      return cls && { ...m, tabella: 'movimenti_carta', fonte: m.carta || 'Carta', importo, contoDescrizione: descrizioneConto(m.codice_conto), ...cls };
+    }),
+  ].filter(Boolean);
 
   renderTable('accontiInAttesaTable', [
     { key: 'data_operazione', label: 'Data', type: 'date' },
     { key: 'fonte', label: 'Fonte', type: 'select' },
+    { key: 'tipoLabel', label: 'Tipo', type: 'select' },
     { key: 'descrizione', label: 'Descrizione' },
     { key: 'contoDescrizione', label: 'Conto', type: 'select', get: r => r.contoDescrizione || '' },
-    { key: 'nota_acconto', label: 'Nota' },
     { key: 'importo', label: 'Importo', numeric: true, type: 'number' },
     { key: 'azione', label: '' },
   ], righe, {
@@ -5320,15 +5351,15 @@ async function loadAccontiInAttesaInterno(statusEl) {
       <tr>
         <td>${fmtDate(r.data_operazione)}</td>
         <td>${r.fonte}</td>
-        <td style="white-space:normal; max-width:360px;">${r.descrizione || ''}</td>
+        <td><span class="pill" style="${r.tipo === 'parziale' ? 'background:#fbe8b0;' : r.tipo === 'acconto' ? 'background:#dce6f5;' : ''}" ${r.tipo === 'parziale' ? `title="Residuo ancora da coprire: € ${fmtEUR(r.residuo)}"` : ''}>${r.tipoLabel}</span></td>
+        <td style="white-space:normal; max-width:340px;">${r.descrizione || ''}${r.nota_acconto ? ` <span class="muted" title="${r.nota_acconto.replace(/"/g, '&quot;')}">(${r.nota_acconto})</span>` : ''}</td>
         <td>${r.contoDescrizione || '<span class="muted">(nessuno)</span>'}</td>
-        <td style="white-space:normal; max-width:220px;">${(r.nota_acconto || '').replace(/</g, '&lt;')}</td>
         <td class="num">${fmtEUR(r.importo)}</td>
         <td style="white-space:nowrap;">
-          <button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" data-acconto-collega-tabella="${r.tabella}" data-acconto-collega-id="${r.id}" data-acconto-collega-descr="${(r.descrizione || '').replace(/"/g, '&quot;')}">&#128279; Collega a fattura</button>
-          <button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" data-acconto-annulla-tabella="${r.tabella}" data-acconto-annulla-id="${r.id}">Annulla</button>
+          <button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" data-acconto-collega-tabella="${r.tabella}" data-acconto-collega-id="${r.id}" data-acconto-collega-descr="${(r.descrizione || '').replace(/"/g, '&quot;')}">&#128279; Collega</button>
+          ${r.tipo === 'acconto' ? `<button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" data-acconto-annulla-tabella="${r.tabella}" data-acconto-annulla-id="${r.id}">Annulla</button>` : ''}
         </td>
-      </tr>`) : [`<tr><td colspan="7" class="muted" style="padding:14px;">Nessun acconto in attesa: tutti i movimenti segnati "in attesa fattura" sono gia' stati collegati.</td></tr>`],
+      </tr>`) : [`<tr><td colspan="7" class="muted" style="padding:14px;">Niente da abbinare: tutti i movimenti sono riconciliati o gia' categorizzati.</td></tr>`],
     afterRender: (container) => {
       container.querySelectorAll('[data-acconto-collega-tabella]').forEach(btn => {
         btn.addEventListener('click', () => apriModaleCollega(btn.dataset.accontoCollegaTabella, btn.dataset.accontoCollegaId, btn.dataset.accontoCollegaDescr, loadAccontiInAttesa));
@@ -5344,9 +5375,11 @@ async function loadAccontiInAttesaInterno(statusEl) {
     },
   });
 
+  const nNuovo = righe.filter(r => r.tipo === 'nuovo').length;
+  const nParziale = righe.filter(r => r.tipo === 'parziale').length;
+  const nAcconto = righe.filter(r => r.tipo === 'acconto').length;
   const totale = righe.reduce((s, r) => s + r.importo, 0);
-  statusEl.textContent = `${righe.length} movimenti in attesa · totale € ${fmtEUR(totale)}` +
-    (riepilogoConti.length ? ' · ' + riepilogoConti.map(([nome, tot]) => `${nome}: € ${fmtEUR(tot)}`).join(' · ') : '');
+  statusEl.textContent = `${righe.length} da abbinare (€ ${fmtEUR(totale)}) · ${nNuovo} mai collegati · ${nParziale} parziali · ${nAcconto} acconti in attesa`;
 }
 document.getElementById('btnRefreshAccontiInAttesa').addEventListener('click', loadAccontiInAttesa);
 
