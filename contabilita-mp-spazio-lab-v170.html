@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 169</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 170</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -1694,8 +1694,11 @@ function contoOptionsHTML(selected) {
   // la descrizione viene prima del codice cosi' si puo' cercare a tastiera per nome (es. digitando
   // "sti" si salta a "Stipendi...") invece di dover conoscere il codice numerico
   const opzioni = pianoConti.filter(c => !CODICE_MEXAL_LEGACY_RE.test(c.codice) || c.codice === String(selected));
-  return `<option value="">(da assegnare)</option>` + opzioni.map(c =>
-    `<option value="${c.codice}" ${String(selected) === c.codice ? 'selected' : ''}>${c.descrizione || ''} (${c.codice})${c._madamePivot ? ' · Madame Pivot' : ''}</option>`).join('');
+  // "(da assegnare)" in fondo, non in cima: aprendo il menu si vedono subito i conti veri da scegliere,
+  // invece di doverci scorrere sopra ogni volta (segnalato dall'utente sul menu di "Da Abbinare")
+  return opzioni.map(c =>
+    `<option value="${c.codice}" ${String(selected) === c.codice ? 'selected' : ''}>${c.descrizione || ''} (${c.codice})${c._madamePivot ? ' · Madame Pivot' : ''}</option>`).join('') +
+    `<option value="" ${selected ? '' : 'selected'}>(da assegnare)</option>`;
 }
 
 // Suggerimento conto per le righe fattura senza conto ("Righe da Assegnare"), stessa idea (indice
