@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 163</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 164</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -273,6 +273,11 @@
       <div class="toolbar" style="flex-wrap:wrap;">
         <button class="btn secondary" id="btnRefreshAccontiInAttesa">Aggiorna</button>
         <span class="muted" id="accontiInAttesaStatus"></span>
+      </div>
+      <div class="toolbar" style="flex-wrap:wrap;">
+        <label style="display:flex; align-items:center; gap:4px;"><input type="checkbox" id="accontiSelezionaTutti"> Seleziona tutte le righe filtrate "Da collegare"</label>
+        <button class="btn" id="btnAccontiDittaVecchiaMassiva">Segna selezionate come Ditta vecchia</button>
+        <span class="muted" id="accontiSelezionateCount"></span>
       </div>
       <div class="table-wrap"><div id="accontiInAttesaTable"></div></div>
     </div>
@@ -5293,6 +5298,15 @@ document.getElementById('btnRefreshVerifica').addEventListener('click', loadVeri
 // apriModaleCollega): riconciliato=false + nota_acconto valorizzata individua esattamente questo
 // insieme, perche' le altre due funzioni che scrivono nota_acconto ("Ditta vecchia", "Escludi")
 // impostano sempre riconciliato=true insieme alla nota - quei casi sono gia' risolti, non "in attesa"
+// selezione multipla per "Segna selezionate come Ditta vecchia" (solo righe tipo 'nuovo', stesso
+// scopo del bottone per riga): chiavi "tabella:id" perche' qui, a differenza di movimentiSelezionate
+// in loadMovimenti, le righe vengono da due tabelle diverse (movimenti_bancari e movimenti_carta)
+let accontiSelezionate = new Set();
+let accontiUltimeFiltrateNuovo = [];
+function aggiornaContatoreAccontiSelezionati() {
+  const el = document.getElementById('accontiSelezionateCount');
+  if (el) el.textContent = accontiSelezionate.size ? `${accontiSelezionate.size} selezionate` : '';
+}
 async function loadAccontiInAttesa() {
   const statusEl = document.getElementById('accontiInAttesaStatus');
   statusEl.textContent = 'Caricamento...';
@@ -5363,6 +5377,7 @@ async function loadAccontiInAttesaInterno(statusEl) {
   ].filter(Boolean);
 
   renderTable('accontiInAttesaTable', [
+    { key: 'sel', label: '' },
     { key: 'data_operazione', label: 'Data', type: 'date' },
     { key: 'fonte', label: 'Fonte', type: 'select' },
     { key: 'tipoLabel', label: 'Tipo', type: 'select' },
@@ -5372,8 +5387,11 @@ async function loadAccontiInAttesaInterno(statusEl) {
     { key: 'azione', label: '' },
   ], righe, {
     defaultSort: 'data_operazione', defaultSortDir: -1,
-    renderRows: (rows) => rows.length ? rows.map(r => `
+    renderRows: (rows) => rows.length ? rows.map(r => {
+      const chiaveSel = `${r.tabella}:${r.id}`;
+      return `
       <tr>
+        <td>${r.tipo === 'nuovo' ? `<input type="checkbox" class="accpnti-riga-check" data-riga-chiave="${chiaveSel}" ${accontiSelezionate.has(chiaveSel) ? 'checked' : ''}>` : ''}</td>
         <td>${fmtDate(r.data_operazione)}</td>
         <td>${r.fonte}</td>
         <td><span class="pill" style="${r.tipo === 'parziale' ? 'background:#fbe8b0;' : r.tipo === 'acconto' ? 'background:#dce6f5;' : ''}" ${r.tipo === 'parziale' ? `title="Residuo ancora da coprire: € ${fmtEUR(r.residuo)}"` : ''}>${r.tipoLabel}</span></td>
@@ -5385,8 +5403,12 @@ async function loadAccontiInAttesaInterno(statusEl) {
           ${r.tipo === 'acconto' ? `<button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" data-acconto-annulla-tabella="${r.tabella}" data-acconto-annulla-id="${r.id}">Annulla</button>` : ''}
           ${r.tipo === 'nuovo' ? `<button type="button" class="btn secondary" style="padding:3px 8px; font-size:11px;" title="Movimento dell'attivita' individuale precedente al conferimento in SRL: non riguarda nessuna fattura di questa azienda" data-vecchia-ditta-tabella="${r.tabella}" data-vecchia-ditta-id="${r.id}">Ditta vecchia</button>` : ''}
         </td>
-      </tr>`) : [`<tr><td colspan="7" class="muted" style="padding:14px;">Niente da abbinare: tutti i movimenti sono riconciliati o gia' categorizzati.</td></tr>`],
-    afterRender: (container) => {
+      </tr>`;
+    }) : [`<tr><td colspan="8" class="muted" style="padding:14px;">Niente da abbinare: tutti i movimenti sono riconciliati o gia' categorizzati.</td></tr>`],
+    afterRender: (container, filtered) => {
+      // solo le righe "Da collegare" sono selezionabili (stessa restrizione del bottone per riga):
+      // e' l'insieme su cui agisce "Seleziona tutte le righe filtrate", ricalcolato a ogni filtro/ordinamento
+      accontiUltimeFiltrateNuovo = filtered.filter(r => r.tipo === 'nuovo');
       container.querySelectorAll('[data-acconto-collega-tabella]').forEach(btn => {
         btn.addEventListener('click', () => apriModaleCollega(btn.dataset.accontoCollegaTabella, btn.dataset.accontoCollegaId, btn.dataset.accontoCollegaDescr, loadAccontiInAttesa));
       });
@@ -5414,6 +5436,16 @@ async function loadAccontiInAttesaInterno(statusEl) {
           loadAccontiInAttesa();
         });
       });
+      const selTutti = document.getElementById('accontiSelezionaTutti');
+      container.querySelectorAll('input.accpnti-riga-check').forEach(chk => {
+        chk.addEventListener('change', () => {
+          if (chk.checked) accontiSelezionate.add(chk.dataset.rigaChiave); else accontiSelezionate.delete(chk.dataset.rigaChiave);
+          aggiornaContatoreAccontiSelezionati();
+          if (selTutti) selTutti.checked = accontiUltimeFiltrateNuovo.length > 0 && accontiUltimeFiltrateNuovo.every(r => accontiSelezionate.has(`${r.tabella}:${r.id}`));
+        });
+      });
+      aggiornaContatoreAccontiSelezionati();
+      if (selTutti) selTutti.checked = accontiUltimeFiltrateNuovo.length > 0 && accontiUltimeFiltrateNuovo.every(r => accontiSelezionate.has(`${r.tabella}:${r.id}`));
     },
   });
 
@@ -5424,6 +5456,38 @@ async function loadAccontiInAttesaInterno(statusEl) {
   statusEl.textContent = `${righe.length} da abbinare (€ ${fmtEUR(totale)}) · ${nNuovo} mai collegati · ${nParziale} parziali · ${nAcconto} acconti in attesa`;
 }
 document.getElementById('btnRefreshAccontiInAttesa').addEventListener('click', loadAccontiInAttesa);
+
+document.getElementById('accontiSelezionaTutti').addEventListener('change', (e) => {
+  const checked = e.target.checked;
+  accontiUltimeFiltrateNuovo.forEach(r => {
+    const chiave = `${r.tabella}:${r.id}`;
+    if (checked) accontiSelezionate.add(chiave); else accontiSelezionate.delete(chiave);
+  });
+  document.getElementById('accontiInAttesaTable').querySelectorAll('input.accpnti-riga-check').forEach(chk => {
+    chk.checked = accontiSelezionate.has(chk.dataset.rigaChiave);
+  });
+  aggiornaContatoreAccontiSelezionati();
+});
+
+document.getElementById('btnAccontiDittaVecchiaMassiva').addEventListener('click', async () => {
+  if (!accontiSelezionate.size) { alert('Seleziona almeno una riga.'); return; }
+  if (!confirm(`Segnare ${accontiSelezionate.size} movimenti come attivita' individuale ante conferimento in SRL? Verranno tolti dalla lista da riconciliare senza collegarli a nessuna fattura.`)) return;
+  const btn = document.getElementById('btnAccontiDittaVecchiaMassiva');
+  btn.disabled = true;
+  let ok = 0, errori = 0;
+  for (const chiave of accontiSelezionate) {
+    const [tabella, id] = chiave.split(':');
+    const { error } = await supabase.from(tabella).update({
+      riconciliato: true,
+      nota_acconto: 'Attivita\' individuale ante conferimento in SRL',
+    }).eq('id', id);
+    if (error) errori++; else ok++;
+  }
+  btn.disabled = false;
+  accontiSelezionate.clear();
+  if (errori) alert(`Segnate ${ok} righe, ${errori} errori.`);
+  loadAccontiInAttesa();
+});
 
 document.getElementById('btnRiconciliaTutto').addEventListener('click', async () => {
   const btn = document.getElementById('btnRiconciliaTutto');
