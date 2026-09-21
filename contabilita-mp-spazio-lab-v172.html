@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 171</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 172</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -2298,7 +2298,7 @@ async function apriModaleCollegaNotaCredito(tabella, rigaId, descrizioneOriginal
       let qA = supabase.from('fatture').select('id,numero,data,importo_totale,fornitore_denominazione')
         .in('azienda', AZIENDE_LETTURA).in('tipo_documento', TIPI_NOTA_CREDITO);
       let qV = supabase.from('fatture_vendita').select('id,numero,sezionale,data,importo_totale,cliente_denominazione')
-        .in('azienda', AZIENDE_LETTURA).in('tipo_documento', TIPI_NOTA_CREDITO);
+        .in('azienda', AZIENDE_LETTURA_VENDITA).in('tipo_documento', TIPI_NOTA_CREDITO);
       // "mostra tutte" ignora il nome (il beneficiario sul movimento puo' essere scritto in modo
       // diverso da come e' registrato in fattura, es. un intestatario diverso da chi ha ordinato)
       if (!mostraTutteNc) {
