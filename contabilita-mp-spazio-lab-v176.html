@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 175</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 176</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -2624,6 +2624,11 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
     const fornitoreApertura = pivaAperturaTrovate.length === 1
       ? { piva: pivaAperturaTrovate[0], nome: (risultati.find(f => f.fornitore_piva === pivaAperturaTrovate[0]) || {}).fornitore_denominazione || '' }
       : null;
+    // quanto e' gia' allocato su fatture vere: serve per proporre solo il residuo all'apertura, non
+    // l'intero movimento - caso reale Due A, 20/12/2021: 282,80 di cui 190,32 sulla fattura 3556 e
+    // solo i restanti 92,48 sul saldo di apertura (confermato dal mastrino Mexal originale)
+    const giaAllocatoApertura = (linkAttuali || []).reduce((s, l) => s + (l.importo_allocato != null ? Number(l.importo_allocato) : Number(l.fattura.importo_totale) || 0), 0);
+    const residuoApertura = Math.max(0, movimentoImporto - giaAllocatoApertura);
     content.innerHTML = `
       <div id="collegaStickyTop" style="position:sticky; top:0; z-index:5; background:var(--card); padding-bottom:6px;">
       <h2>Collega a una o piu' fatture o notule</h2>
@@ -2645,10 +2650,11 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
         <a href="#" id="segnaAperturaToggle" style="font-size:12px;">Segna come pagamento su saldo di apertura conferimento (${(fornitoreApertura.nome || '').replace(/</g, '&lt;')})</a>
         <div id="segnaAperturaForm" style="display:none; margin-top:6px; padding:8px; background:var(--bg-soft,#f4f4f2); border-radius:6px;">
           <div style="display:flex; gap:8px; margin-bottom:6px; flex-wrap:wrap; align-items:center;">
+            <input type="number" step="0.01" id="segnaAperturaImporto" value="${residuoApertura.toFixed(2)}" style="width:100px; padding:6px;" title="Importo da destinare al saldo di apertura: modificabile, di default e' quanto resta del movimento dopo eventuali fatture gia' collegate">
             <input type="text" id="segnaAperturaNota" placeholder="Nota (facoltativa)" style="flex:1; min-width:200px; padding:6px;">
             <button type="button" class="btn secondary" id="segnaAperturaConferma">Conferma</button>
           </div>
-          <p class="muted" style="margin:0; font-size:11px;">Per il debito ereditato dalla ditta individuale al momento del conferimento in SRL (04/05/2021), non collegato a nessuna fattura vera. Registra questo movimento come acconto sul saldo di apertura di ${(fornitoreApertura.nome || '').replace(/</g, '&lt;')} (visibile nel suo Mastrino Fornitori) e chiude il movimento senza collegarlo a nulla.</p>
+          <p class="muted" style="margin:0; font-size:11px;">Per il debito ereditato dalla ditta individuale al momento del conferimento in SRL (04/05/2021), non collegato a nessuna fattura vera. L'importo proposto (€ ${fmtEUR(residuoApertura)}) e' quanto resta del movimento (€ ${fmtEUR(movimentoImporto)}) al netto di eventuali fatture gia' collegate qui sopra${giaAllocatoApertura > 0.02 ? ` (€ ${fmtEUR(giaAllocatoApertura)} gia' allocati)` : ''} - modificalo se serve dividere diversamente. Registra l'importo come acconto sul saldo di apertura di ${(fornitoreApertura.nome || '').replace(/</g, '&lt;')} (visibile nel suo Mastrino Fornitori); il movimento risulta riconciliato solo se la somma tra fatture collegate e apertura copre l'intero importo.</p>
           <div id="segnaAperturaStatus" style="font-size:12px; margin-top:4px;"></div>
         </div>` : `<span class="muted" style="font-size:11px;" title="Serve prima una ricerca per nome di un unico fornitore (non 'mostra tutte'), per sapere a chi attribuire l'acconto">Per segnare un pagamento su saldo di apertura conferimento, cerca prima il fornitore per nome qui sopra.</span>`}
       </div>
@@ -2907,17 +2913,27 @@ async function apriModaleCollega(tabella, rigaId, descrizioneOriginale, onSalvat
     if (segnaAperturaConferma) segnaAperturaConferma.addEventListener('click', async () => {
       const statusEl = document.getElementById('segnaAperturaStatus');
       if (!fornitoreApertura) return;
+      const importoApertura = Number(document.getElementById('segnaAperturaImporto').value) || 0;
+      if (importoApertura <= 0) {
+        statusEl.textContent = 'Inserisci un importo maggiore di zero.';
+        statusEl.style.color = '#b00';
+        return;
+      }
       const nota = document.getElementById('segnaAperturaNota').value.trim();
       // due scritture separate: la riga sul saldo di apertura (per il Mastrino Fornitori, vedi
       // pagamenti_apertura_fornitori) e la chiusura del movimento stesso (riconciliato + nota, stesso
-      // meccanismo di "Ditta vecchia"/"Escludi" - non e' collegato a nessuna fattura vera)
+      // meccanismo di "Ditta vecchia"/"Escludi") - solo per l'importo indicato, non necessariamente
+      // tutto il movimento: puo' esserci gia' una fattura vera collegata sopra (caso reale Due A,
+      // 20/12/2021: 190,32 sulla fattura 3556 + 92,48 di apertura = 282,80 del movimento), quindi
+      // "riconciliato" diventa true solo se fatture gia' collegate + questo importo coprono il totale
       const { error: errApertura } = await supabase.from('pagamenti_apertura_fornitori').insert({
         azienda: AZIENDA_SCRITTURA, fornitore_piva: fornitoreApertura.piva,
-        data: movimentoData, importo: movimentoImporto, nota: nota || null,
+        data: movimentoData, importo: importoApertura, nota: nota || null,
       });
       if (errApertura) { statusEl.textContent = 'Errore: ' + errApertura.message; statusEl.style.color = '#b00'; return; }
+      const riconciliatoOra = (giaAllocatoApertura + importoApertura) >= movimentoImporto - 0.02;
       const { error: errMov } = await supabase.from(tabella).update({
-        riconciliato: true, codice_conto: null,
+        riconciliato: riconciliatoOra, codice_conto: null,
         nota_acconto: `Acconto su apertura conferimento (${fornitoreApertura.nome})${nota ? ' - ' + nota : ''}`,
       }).eq('id', rigaId);
       if (errMov) { statusEl.textContent = 'Errore: ' + errMov.message; statusEl.style.color = '#b00'; return; }
