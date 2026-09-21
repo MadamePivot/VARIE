@@ -161,7 +161,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 173</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 174</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -6359,8 +6359,12 @@ let pianoContiMexalCaricatoPer = null;
 
 async function assicuraPianoContiMexal() {
   if (pianoContiMexalCaricatoPer === AZIENDA_SCRITTURA && pianoContiMexal.length) return;
-  const { data, error } = await supabase.from('piano_conti_mexal').select('codice,descrizione,mastro')
-    .eq('azienda', AZIENDA_SCRITTURA).order('codice');
+  // 10.759 conti (segnalato dall'utente: la ricerca trovava solo i clienti, 205.xxxxx, mai i
+  // fornitori, 405.xxxxx) - senza fetchTutteLeRighe PostgREST tronca silenziosamente a 1000 righe,
+  // e ordinati per codice i fornitori restano sempre oltre quel taglio (stesso bug gia' noto altrove,
+  // vedi loadDaAssegnare)
+  const { data, error } = await fetchTutteLeRighe(() => supabase.from('piano_conti_mexal').select('codice,descrizione,mastro')
+    .eq('azienda', AZIENDA_SCRITTURA).order('codice'));
   if (error) { console.error(error); pianoContiMexal = []; return; }
   pianoContiMexal = data || [];
   pianoContiMexalCaricatoPer = AZIENDA_SCRITTURA;
