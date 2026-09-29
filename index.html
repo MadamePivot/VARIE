@@ -162,7 +162,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 247</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 248</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14287,13 +14287,20 @@ async function assegnaContoMancante(p, tipo, conto, tutte = [], perFornitore = f
   return altre;
 }
 
-function apriAnteprimaScritture(esito, origine) {
+async function apriAnteprimaScritture(esito, origine) {
   const overlay = document.getElementById('modalAutomatismiOverlay');
   const box = document.getElementById('modalAutomatismiContent');
   const { proposte, senzaRegola, totaleDocs } = esito;
   box.onclick = null; box.onchange = null;
   const scelte = new Set(proposte.map((p, i) => p.quadra ? i : -1).filter(i => i >= 0));
   // menu con poche voci: i mastri; in fondo "tutti i conti" per il dettaglio
+  // suggerimenti: i conti gia' usati per lo stesso fornitore/cliente, dal piu' frequente
+  const suggerimenti = new Map();
+  const suggerimentiHtml = (p, i, fix) => {
+    if (fix !== 'righe') return '';
+    const l = suggerimenti.get(p.d.controparte) || [];
+    return l.length ? `<div style="margin-top:3px;">${l.map(x => `<button type="button" class="btn secondary" style="padding:1px 6px; font-size:10.5px; margin:1px 3px 1px 0;" data-sugg="${i}" data-conto="${x.conto}" title="usato ${x.n} volte per questo fornitore">${escR(nomeContoGenerale(x.conto).replace(/^\d\d\.\d{4} /, ''))} <span class="muted">${x.conto}</span></button>`).join('')}</div>` : '';
+  };
   // ricerca per parola (anche a meta' del nome): prima i mastri, poi le voci di dettaglio, infine "nuova voce"
   const voceConto = c => `${c.descrizione || ''} (${c.codice})`;
   const riempiDatalist = () => {
@@ -14309,7 +14316,7 @@ function apriAnteprimaScritture(esito, origine) {
       <td>${j === 0 ? `<input type="checkbox" data-ante="${i}" ${p.quadra ? (scelte.has(i) ? 'checked' : '') : 'disabled'}>` : ''}</td>
       <td>${j === 0 ? fmtDate(p.data) : ''}</td><td style="white-space:normal; min-width:220px;">${j === 0 ? escR(p.descrizione) + `<div class="muted" style="font-size:10.5px;">${escR(p.regola.nome)}</div>` : ''}${j === 0 && p.problemi.length ? `<div style="color:var(--red); font-size:11px;">${escR(p.problemi.join(' · '))}</div>` : ''}</td>
       <td style="white-space:normal; min-width:200px;${r.conto ? '' : ' color:var(--red);'}">${r.conto ? escR(nomeContoGenerale(r.conto)) : (r.fix
-        ? `<input type="text" list="anteConti" data-fix="${i}" data-fix-tipo="${r.fix}" placeholder="scrivi per cercare il conto…" style="width:270px; padding:4px;" title="${r.fix === 'righe' ? 'Assegna il conto a tutte le righe di questa fattura senza conto' : 'Assegna il conto a questo movimento'}">`
+        ? `<input type="text" list="anteConti" data-fix="${i}" data-fix-tipo="${r.fix}" placeholder="scrivi per cercare il conto…" style="width:270px; padding:4px;" title="${r.fix === 'righe' ? 'Assegna il conto a tutte le righe di questa fattura senza conto' : 'Assegna il conto a questo movimento'}">${suggerimentiHtml(p, i, r.fix)}`
         : '— manca —')}${r.controparte ? `<div class="muted" style="font-size:10.5px;">${escR(r.controparte)}</div>` : ''}</td>
       <td class="num" style="white-space:nowrap;">${r.dare ? fmtEUR(r.dare) : ''}</td><td class="num" style="white-space:nowrap;">${r.avere ? fmtEUR(r.avere) : ''}</td></tr>`).join(''); }).join('');
   box.innerHTML = `<h2>Anteprima scritture — ${escR(ORIGINI_SCRITTURE[origine].label)}</h2>
@@ -14336,6 +14343,18 @@ function apriAnteprimaScritture(esito, origine) {
     document.getElementById('antePag').textContent = `${nVis} scritture · pagina ${pagina + 1} di ${nPag}`;
     document.getElementById('anteCorpo').innerHTML = corpo();
     box.querySelectorAll('[data-ante]').forEach(c => c.addEventListener('change', () => { c.checked ? scelte.add(Number(c.dataset.ante)) : scelte.delete(Number(c.dataset.ante)); agg(); }));
+    const applica = async (i, tipo, conto, campo) => {
+      if (campo) campo.disabled = true;
+      try {
+        const altre = await assegnaContoMancante(proposte[i], tipo, conto, proposte, !!(document.getElementById('anteFornitore') || {}).checked);
+        [proposte[i], ...altre].forEach(q => { if (q.quadra) scelte.add(proposte.indexOf(q)); });
+        const tot = proposte[i].d.applicateArchivio;
+        st.className = 'status ok';
+        st.textContent = `Conto assegnato e regola salvata` + (tot ? `: applicato a ${tot} righe uguali in tutto l'archivio` : '') + (altre.length ? ` (${altre.length} scritture dell'anteprima aggiornate)` : '') + '. Le prossime righe uguali le assegno da solo.';
+      } catch (e) { st.className = 'status err'; st.textContent = 'Errore: ' + (e.message || e); }
+      disegna();
+    };
+    box.querySelectorAll('[data-sugg]').forEach(b => b.addEventListener('click', () => applica(Number(b.dataset.sugg), 'righe', b.dataset.conto, null)));
     box.querySelectorAll('[data-fix]').forEach(sl => sl.addEventListener('change', async () => {
       if (!sl.value) return;
       let conto = (/\((\d\d\.\d{4})\)\s*$/.exec(sl.value) || [])[1];
@@ -14346,15 +14365,7 @@ function apriAnteprimaScritture(esito, origine) {
         if (!conto) { sl.value = ''; return; }
       }
       if (!conto) { st.className = 'status err'; st.textContent = 'Scegli una voce dall\'elenco (scrivi una parte del nome, es. "ristor").'; return; }
-      const i = Number(sl.dataset.fix);
-      sl.disabled = true;
-      try {
-        const altre = await assegnaContoMancante(proposte[i], sl.dataset.fixTipo, conto, proposte, !!(document.getElementById('anteFornitore') || {}).checked);
-        [proposte[i], ...altre].forEach(q => { if (q.quadra) scelte.add(proposte.indexOf(q)); });
-        st.className = 'status ok'; const tot = proposte[i].d.applicateArchivio;
-        st.textContent = `Conto assegnato e regola salvata` + (tot ? `: applicato a ${tot} righe uguali in tutto l'archivio` : '') + (altre.length ? ` (${altre.length} scritture dell'anteprima aggiornate)` : '') + '. Le prossime righe uguali le assegno da solo.';
-      } catch (e) { st.className = 'status err'; st.textContent = 'Errore: ' + (e.message || e); }
-      disegna();
+      await applica(Number(sl.dataset.fix), sl.dataset.fixTipo, conto, sl);
     }));
     agg();
   };
@@ -14363,6 +14374,17 @@ function apriAnteprimaScritture(esito, origine) {
   document.getElementById('anteSucc').onclick = () => { pagina++; disegna(); };
   document.getElementById('anteTutte').onchange = e => { proposte.forEach((p, i) => { if (p.quadra) { e.target.checked ? scelte.add(i) : scelte.delete(i); } }); disegna(); };
   riempiDatalist();
+  // suggerimenti per i fornitori delle scritture senza conto (una sola chiamata)
+  try {
+    const nomi = [...new Set(proposte.filter(p => p.righe.some(r => r.fix === 'righe')).map(p => p.d.controparte).filter(Boolean))];
+    const azienda = proposte.find(p => p.righe.some(r => r.fix === 'righe'))?.azienda;
+    if (nomi.length) {
+      const { data } = await supabase.rpc('suggerimenti_conti_controparte', { p_azienda: azienda, p_controparti: nomi, p_vendita: origine === 'fattura_vendita' });
+      const per = new Map();
+      (data || []).filter(x => !/^99\./.test(x.codice_conto)).forEach(x => { if (!per.has(x.controparte)) per.set(x.controparte, []); per.get(x.controparte).push({ conto: x.codice_conto, n: Number(x.n) }); });
+      per.forEach((l, k) => suggerimenti.set(k, l.sort((a, b) => b.n - a.n).slice(0, 4)));
+    }
+  } catch (e) { console.warn('suggerimenti:', e); }
   disegna();
   document.getElementById('anteRegistra').onclick = async () => {
     const daSalvare = [...scelte].map(i => proposte[i]).filter(p => p.quadra);

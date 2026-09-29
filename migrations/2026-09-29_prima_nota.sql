@@ -84,3 +84,7 @@ create index if not exists idx_mc_azienda_data on movimenti_carta(azienda, data_
 
 -- assegnazioni automatiche del conto (fornitore/cliente + descrizione -> conto); vedi tabella regole_assegnazione_righe e
 -- funzione applica_regole_assegnazione(p_azienda) nel database
+
+-- suggerimenti: conti gia' usati per lo stesso fornitore/cliente (funzione suggerimenti_conti_controparte nel database)
+create index if not exists idx_fatture_azienda_fornitore on fatture(azienda, fornitore_denominazione);
+create index if not exists idx_fatture_vendita_azienda_cliente on fatture_vendita(azienda, cliente_denominazione);
