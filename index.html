@@ -162,7 +162,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 246</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 247</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14231,7 +14231,7 @@ async function creaVoceDaAnteprima() {
 }
 
 // assegna il conto mancante direttamente dall'anteprima: righe fattura senza conto, o conto del movimento
-async function assegnaContoMancante(p, tipo, conto, tutte = []) {
+async function assegnaContoMancante(p, tipo, conto, tutte = [], perFornitore = false) {
   const mancante = v => v == null || v === '';
   let altre = [];
   if (tipo === 'righe') {
@@ -14241,19 +14241,20 @@ async function assegnaContoMancante(p, tipo, conto, tutte = []) {
     // stesse righe di altre fatture dello stesso fornitore/cliente (stessa descrizione) nell'anteprima
     const descr = [...new Set(p.d.righe.filter(r => mancante(r.codice_conto) && r.descrizione).map(r => r.descrizione))];
     p.d.righe.forEach(r => { if (mancante(r.codice_conto)) r.codice_conto = conto; });
-    altre = descr.length ? tutte.filter(q => q !== p && q.origine === p.origine && q.d.controparte === p.d.controparte
-      && q.d.righe.some(r => mancante(r.codice_conto) && descr.includes(r.descrizione))) : [];
+    altre = (descr.length || perFornitore) ? tutte.filter(q => q !== p && q.origine === p.origine && q.d.controparte === p.d.controparte
+      && q.d.righe.some(r => mancante(r.codice_conto) && (perFornitore || descr.includes(r.descrizione)))) : [];
     // regola durevole: fornitore/cliente + descrizione -> conto, applicata a TUTTE le righe uguali dell'archivio
     // (qualsiasi periodo) e alle fatture che arriveranno
-    if (descr.length && p.d.controparte) {
-      const regole = descr.map(d => ({ azienda: p.azienda, tabella: tabR, controparte: p.d.controparte, descrizione: d, codice_conto: conto, attiva: true }));
+    if ((descr.length || perFornitore) && p.d.controparte) {
+      // fornitore ricorrente: una sola regola con descrizione vuota = tutte le sue righe (quelle con descrizione precisa vincono)
+      const regole = (perFornitore ? [''] : descr).map(d => ({ azienda: p.azienda, tabella: tabR, controparte: p.d.controparte, descrizione: d, codice_conto: conto, attiva: true }));
       const { error: eR } = await supabase.from('regole_assegnazione_righe').upsert(regole, { onConflict: 'azienda,tabella,controparte,descrizione' });
       if (eR) throw eR;
       const { data: nTot, error: eA } = await supabase.rpc('applica_regole_assegnazione', { p_azienda: p.azienda });
       if (eA) throw eA;
       p.d.applicateArchivio = Number(nTot) || 0;
     }
-    altre.forEach(q => q.d.righe.forEach(r => { if (mancante(r.codice_conto) && descr.includes(r.descrizione)) r.codice_conto = conto; }));
+    altre.forEach(q => q.d.righe.forEach(r => { if (mancante(r.codice_conto) && (perFornitore || descr.includes(r.descrizione))) r.codice_conto = conto; }));
   } else {
     const { error } = await supabase.from(p.tab).update({ codice_conto: conto, riconciliato: true }).eq('id', p.docId);
     if (error) throw error;
@@ -14314,6 +14315,7 @@ function apriAnteprimaScritture(esito, origine) {
   box.innerHTML = `<h2>Anteprima scritture — ${escR(ORIGINI_SCRITTURE[origine].label)}</h2>
     <p class="muted" style="margin-top:0;" id="anteInfo"></p>
     <div class="toolbar"><label><input type="checkbox" id="anteTutte" checked> Seleziona tutte le pronte</label>
+      <label title="Per fornitori ricorrenti (corrieri, utenze): la regola vale per tutte le sue righe senza conto, anche future, qualunque sia la descrizione"><input type="checkbox" id="anteFornitore"> Conto valido per tutto il fornitore</label>
       <label>Mostra: <select id="anteFiltro"><option value="tutte">tutte</option><option value="problemi">solo con problemi</option><option value="pronte">solo pronte</option></select></label>
       <button type="button" class="btn secondary" id="antePrec">◀</button><span class="muted" id="antePag"></span><button type="button" class="btn secondary" id="anteSucc">▶</button>
       <button type="button" class="btn" id="anteRegistra">Registra selezionate</button><span class="muted" id="anteSel"></span></div>
@@ -14347,7 +14349,7 @@ function apriAnteprimaScritture(esito, origine) {
       const i = Number(sl.dataset.fix);
       sl.disabled = true;
       try {
-        const altre = await assegnaContoMancante(proposte[i], sl.dataset.fixTipo, conto, proposte);
+        const altre = await assegnaContoMancante(proposte[i], sl.dataset.fixTipo, conto, proposte, !!(document.getElementById('anteFornitore') || {}).checked);
         [proposte[i], ...altre].forEach(q => { if (q.quadra) scelte.add(proposte.indexOf(q)); });
         st.className = 'status ok'; const tot = proposte[i].d.applicateArchivio;
         st.textContent = `Conto assegnato e regola salvata` + (tot ? `: applicato a ${tot} righe uguali in tutto l'archivio` : '') + (altre.length ? ` (${altre.length} scritture dell'anteprima aggiornate)` : '') + '. Le prossime righe uguali le assegno da solo.';
@@ -14491,7 +14493,7 @@ async function loadRegoleAssegnazioneRighe() {
   if (error) { box.textContent = 'Errore: ' + error.message; return; }
   box.innerHTML = data.length ? `<table class="data"><thead><tr><th>Attiva</th><th>Fornitore / cliente</th><th>Descrizione riga</th><th>Conto</th><th></th></tr></thead><tbody>
     ${data.map(r => `<tr${r.attiva ? '' : ' style="opacity:.5;"'}><td><input type="checkbox" data-ra-attiva="${r.id}" ${r.attiva ? 'checked' : ''}></td><td style="white-space:normal;">${escR(r.controparte)}</td>
-      <td style="white-space:normal; max-width:420px;">${escR(r.descrizione)}</td><td>${escR(nomeContoGenerale(r.codice_conto))}</td>
+      <td style="white-space:normal; max-width:420px;">${r.descrizione ? escR(r.descrizione) : '<em>tutte le righe del fornitore</em>'}</td><td>${escR(nomeContoGenerale(r.codice_conto))}</td>
       <td><button type="button" class="btn secondary" style="padding:2px 8px; font-size:11px; color:var(--red);" data-ra-elimina="${r.id}">Elimina</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted">Nessuna ancora.</p>';
   box.querySelectorAll('[data-ra-attiva]').forEach(c => c.addEventListener('change', async () => { await supabase.from('regole_assegnazione_righe').update({ attiva: c.checked }).eq('id', c.dataset.raAttiva); loadRegoleAssegnazioneRighe(); }));
   box.querySelectorAll('[data-ra-elimina]').forEach(b => b.addEventListener('click', async () => {
