@@ -81,3 +81,6 @@ create index if not exists idx_fatture_azienda_data on fatture(azienda, data);
 create index if not exists idx_fatture_vendita_azienda_data on fatture_vendita(azienda, data);
 create index if not exists idx_mb_azienda_data on movimenti_bancari(azienda, data_operazione);
 create index if not exists idx_mc_azienda_data on movimenti_carta(azienda, data_operazione);
+
+-- assegnazioni automatiche del conto (fornitore/cliente + descrizione -> conto); vedi tabella regole_assegnazione_righe e
+-- funzione applica_regole_assegnazione(p_azienda) nel database

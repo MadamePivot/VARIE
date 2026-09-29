@@ -162,7 +162,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 245</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 246</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -913,6 +913,9 @@
         <span class="muted" id="regoleScrCount"></span>
       </div>
       <div class="table-wrap"><div id="regoleScrTable"></div></div>
+      <h3 style="margin:18px 0 4px;">Assegnazioni automatiche del conto (righe fattura)</h3>
+      <p class="muted" style="margin:0 0 8px;">Nascono quando assegni un conto a una riga dall'anteprima: <em>fornitore/cliente + descrizione → conto</em>. Valgono per tutte le righe uguali, passate e future.</p>
+      <div class="table-wrap"><div id="regoleAssTable"></div></div>
     </div>
   </section>
 
@@ -14016,7 +14019,7 @@ function datiScrittura(origine, doc, righe, coll = null) {
   const dare = carta ? Math.max(0, Number(doc.importo) || 0) : Number(doc.dare) || 0;
   const avere = carta ? Math.max(0, -(Number(doc.importo) || 0)) : Number(doc.avere) || 0;
   const imp = r2(dare > 0 ? dare : avere);
-  return { data: doc.data_operazione, azienda: doc.azienda, controparte: (coll && coll.nome) || doc.descrizione, collegamento: coll ? coll.tipo : 'nessuno', descrizione: (doc.descrizione || '').slice(0, 120),
+  return { data: doc.data_operazione, azienda: doc.azienda, controparte: (coll && coll.nome) || doc.descrizione, collegamento: coll ? coll.tipo : 'nessuno', descrizione: (doc.descrizione || '').slice(0, 120), descrizioneCompleta: doc.descrizione || '',
     totale: imp, imponibile: imp, iva: 0, importo: imp, nota_credito: false, tipoDoc: '', righe: [],
     verso: dare > 0 ? 'dare' : 'avere', banca: String((carta ? doc.carta : doc.banca) || '').toUpperCase(),
     numeroConto: String(doc.numero_conto || '').replace(/\s+/g, '').toUpperCase(),
@@ -14149,6 +14152,11 @@ async function caricaDocumentiPerScritture(origine, dal, al) {
 async function proponiScritture(origine, dal, al) {
   const regole = await loadRegoleScritture(true);
   if (!pianoConti.length) await loadPianoConti();
+  // assegna da sole le righe fattura senza conto per cui esiste una regola (fornitore + descrizione)
+  if (origine === 'fattura_acquisto' || origine === 'fattura_vendita') {
+    const { error: eAr } = await supabase.rpc('applica_regole_assegnazione');
+    if (eAr) console.warn('applica_regole_assegnazione:', eAr.message);
+  }
   const { tab, docs, righePerDoc, collegamenti, totaleDocs } = await caricaDocumentiPerScritture(origine, dal, al);
   const proposte = [];
   let senzaRegola = 0;
@@ -14235,12 +14243,17 @@ async function assegnaContoMancante(p, tipo, conto, tutte = []) {
     p.d.righe.forEach(r => { if (mancante(r.codice_conto)) r.codice_conto = conto; });
     altre = descr.length ? tutte.filter(q => q !== p && q.origine === p.origine && q.d.controparte === p.d.controparte
       && q.d.righe.some(r => mancante(r.codice_conto) && descr.includes(r.descrizione))) : [];
-    if (altre.length) {
-      const { error: e2 } = await supabase.from(tabR).update({ codice_conto: conto })
-        .in('fattura_id', altre.map(q => q.docId)).in('descrizione', descr).or('codice_conto.is.null,codice_conto.eq.');
-      if (e2) throw e2;
-      altre.forEach(q => q.d.righe.forEach(r => { if (mancante(r.codice_conto) && descr.includes(r.descrizione)) r.codice_conto = conto; }));
+    // regola durevole: fornitore/cliente + descrizione -> conto, applicata a TUTTE le righe uguali dell'archivio
+    // (qualsiasi periodo) e alle fatture che arriveranno
+    if (descr.length && p.d.controparte) {
+      const regole = descr.map(d => ({ azienda: p.azienda, tabella: tabR, controparte: p.d.controparte, descrizione: d, codice_conto: conto, attiva: true }));
+      const { error: eR } = await supabase.from('regole_assegnazione_righe').upsert(regole, { onConflict: 'azienda,tabella,controparte,descrizione' });
+      if (eR) throw eR;
+      const { data: nTot, error: eA } = await supabase.rpc('applica_regole_assegnazione', { p_azienda: p.azienda });
+      if (eA) throw eA;
+      p.d.applicateArchivio = Number(nTot) || 0;
     }
+    altre.forEach(q => q.d.righe.forEach(r => { if (mancante(r.codice_conto) && descr.includes(r.descrizione)) r.codice_conto = conto; }));
   } else {
     const { error } = await supabase.from(p.tab).update({ codice_conto: conto, riconciliato: true }).eq('id', p.docId);
     if (error) throw error;
@@ -14248,10 +14261,25 @@ async function assegnaContoMancante(p, tipo, conto, tutte = []) {
     // movimenti con la stessa descrizione, banca e verso
     const chiave = q => `${q.d.descrizione}|${q.d.banca}|${q.d.verso}`;
     altre = tutte.filter(q => q !== p && q.tab === p.tab && !q.d.contoMovimento && chiave(q) === chiave(p));
-    if (altre.length) {
-      const { error: e2 } = await supabase.from(p.tab).update({ codice_conto: conto, riconciliato: true }).in('id', altre.map(q => q.docId));
+    altre.forEach(q => { q.d.contoMovimento = conto; });
+    // stessa descrizione in tutto l'archivio (non solo nell'anteprima) + regola per i movimenti futuri
+    const testo = String(p.d.descrizioneCompleta || '').trim();
+    if (testo && !testo.includes('|')) {
+      const bancaCol = p.tab === 'movimenti_carta' ? 'carta' : 'banca';
+      let q = supabase.from(p.tab).update({ codice_conto: conto, riconciliato: true }).eq('azienda', p.azienda).eq('descrizione', testo).is('codice_conto', null);
+      q = p.d.verso === 'dare' ? (p.tab === 'movimenti_carta' ? q.gt('importo', 0) : q.gt('dare', 0)) : (p.tab === 'movimenti_carta' ? q.lt('importo', 0) : q.gt('avere', 0));
+      const { data: fatti, error: e2 } = await q.select('id');
       if (e2) throw e2;
-      altre.forEach(q => { q.d.contoMovimento = conto; });
+      p.d.applicateArchivio = (fatti || []).length;
+      const { data: esiste } = await supabase.from('regole_categorizzazione').select('id').eq('azienda', p.azienda).eq('tabella_movimento', p.tab)
+        .eq('descrizione_contiene', testo).eq('codice_conto', conto).limit(1);
+      if (!esiste || !esiste.length) {
+        const { error: eR } = await supabase.from('regole_categorizzazione').insert({
+          nome: 'Da anteprima prima nota: ' + testo.slice(0, 60), azienda: p.azienda, tabella_movimento: p.tab, banca: p.d.banca || null,
+          descrizione_contiene: testo, verso: p.d.verso, codice_conto: conto, riconcilia: true, priorita: 300, attiva: true, automatica: true,
+          note: 'Creata assegnando il conto dall\'anteprima della prima nota' });
+        if (eR) console.warn('regola categorizzazione:', eR.message);
+      }
     }
   }
   [p, ...altre].forEach(q => Object.assign(q, costruisciScrittura(q.regola, q.origine, q.d)));
@@ -14321,7 +14349,8 @@ function apriAnteprimaScritture(esito, origine) {
       try {
         const altre = await assegnaContoMancante(proposte[i], sl.dataset.fixTipo, conto, proposte);
         [proposte[i], ...altre].forEach(q => { if (q.quadra) scelte.add(proposte.indexOf(q)); });
-        st.className = 'status ok'; st.textContent = altre.length ? `Conto assegnato, e applicato ad altre ${altre.length} righe uguali (stesso ${sl.dataset.fixTipo === 'righe' ? 'fornitore e descrizione' : 'testo, banca e verso'}).` : 'Conto assegnato.';
+        st.className = 'status ok'; const tot = proposte[i].d.applicateArchivio;
+        st.textContent = `Conto assegnato e regola salvata` + (tot ? `: applicato a ${tot} righe uguali in tutto l'archivio` : '') + (altre.length ? ` (${altre.length} scritture dell'anteprima aggiornate)` : '') + '. Le prossime righe uguali le assegno da solo.';
       } catch (e) { st.className = 'status err'; st.textContent = 'Errore: ' + (e.message || e); }
       disegna();
     }));
@@ -14452,7 +14481,23 @@ async function loadRegoleScrittureTab() {
       loadRegoleScrittureTab();
     }));
     el.querySelectorAll('[data-rs-modifica]').forEach(b => b.addEventListener('click', () => apriModaleRegolaScrittura(regole.find(r => String(r.id) === b.dataset.rsModifica))));
+    loadRegoleAssegnazioneRighe();
   } catch (e) { el.textContent = 'Errore: ' + (e.message || e); }
+}
+
+async function loadRegoleAssegnazioneRighe() {
+  const box = document.getElementById('regoleAssTable');
+  const { data, error } = await fetchTutteLeRighe(() => supabase.from('regole_assegnazione_righe').select('*').order('controparte').order('id'));
+  if (error) { box.textContent = 'Errore: ' + error.message; return; }
+  box.innerHTML = data.length ? `<table class="data"><thead><tr><th>Attiva</th><th>Fornitore / cliente</th><th>Descrizione riga</th><th>Conto</th><th></th></tr></thead><tbody>
+    ${data.map(r => `<tr${r.attiva ? '' : ' style="opacity:.5;"'}><td><input type="checkbox" data-ra-attiva="${r.id}" ${r.attiva ? 'checked' : ''}></td><td style="white-space:normal;">${escR(r.controparte)}</td>
+      <td style="white-space:normal; max-width:420px;">${escR(r.descrizione)}</td><td>${escR(nomeContoGenerale(r.codice_conto))}</td>
+      <td><button type="button" class="btn secondary" style="padding:2px 8px; font-size:11px; color:var(--red);" data-ra-elimina="${r.id}">Elimina</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted">Nessuna ancora.</p>';
+  box.querySelectorAll('[data-ra-attiva]').forEach(c => c.addEventListener('change', async () => { await supabase.from('regole_assegnazione_righe').update({ attiva: c.checked }).eq('id', c.dataset.raAttiva); loadRegoleAssegnazioneRighe(); }));
+  box.querySelectorAll('[data-ra-elimina]').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('Eliminare l\'assegnazione? Le righe già assegnate restano come sono.')) return;
+    await supabase.from('regole_assegnazione_righe').delete().eq('id', b.dataset.raElimina); loadRegoleAssegnazioneRighe();
+  }));
 }
 
 function apriModaleRegolaScrittura(regola, comeNuova = false) {
