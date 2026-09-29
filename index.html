@@ -162,7 +162,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 244</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 245</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14265,13 +14265,14 @@ function apriAnteprimaScritture(esito, origine) {
   box.onclick = null; box.onchange = null;
   const scelte = new Set(proposte.map((p, i) => p.quadra ? i : -1).filter(i => i >= 0));
   // menu con poche voci: i mastri; in fondo "tutti i conti" per il dettaglio
-  const opzioniMastri = () => '<option value="">(da assegnare)</option>' + pianoConti.filter(c => /^\d\d\.0000$/.test(c.codice) && !c._altraAzienda && !/^8[2-6]\./.test(c.codice))
-    .sort((x, y) => x.codice.localeCompare(y.codice)).map(c => {
-      // le voci di dettaglio del mastro nel testo, cosi' si riconosce dove sta ad es. "Bar e ristoranti"
-      const sotto = pianoConti.filter(x => x.codice.startsWith(c.codice.slice(0, 3)) && x.codice !== c.codice && !x._altraAzienda).map(x => x.descrizione).filter(Boolean);
-      const elenco = sotto.length ? ' — ' + sotto.slice(0, 6).join(', ') + (sotto.length > 6 ? '…' : '') : '';
-      return `<option value="${c.codice}">${escR(c.descrizione || '')} (${c.codice})${escR(elenco)}</option>`;
-    }).join('') + '<option value="__nuova__">+ Nuova voce…</option><option value="__tutti__">— mostra tutti i conti di dettaglio —</option>';
+  // ricerca per parola (anche a meta' del nome): prima i mastri, poi le voci di dettaglio, infine "nuova voce"
+  const voceConto = c => `${c.descrizione || ''} (${c.codice})`;
+  const riempiDatalist = () => {
+    const ok = c => !c._altraAzienda && !/^(82|83|84|85|86)\./.test(c.codice) && /^\d\d\.\d{4}$/.test(c.codice) && !CODICE_MEXAL_LEGACY_RE.test(c.codice);
+    const tutti = pianoConti.filter(ok).sort((x, y) => x.codice.localeCompare(y.codice));
+    const mastri = tutti.filter(c => c.codice.endsWith('.0000')), dettagli = tutti.filter(c => !c.codice.endsWith('.0000'));
+    document.getElementById('anteConti').innerHTML = [...mastri, ...dettagli].map(c => `<option value="${escR(voceConto(c))}"></option>`).join('') + '<option value="+ Nuova voce…"></option>';
+  };
   const PAG = 60;
   let pagina = 0, filtro = proposte.some(p => !p.quadra) ? 'problemi' : 'tutte';
   const visibili = () => proposte.map((p, i) => i).filter(i => filtro === 'tutte' || (filtro === 'problemi' ? !proposte[i].quadra : proposte[i].quadra));
@@ -14279,7 +14280,7 @@ function apriAnteprimaScritture(esito, origine) {
       <td>${j === 0 ? `<input type="checkbox" data-ante="${i}" ${p.quadra ? (scelte.has(i) ? 'checked' : '') : 'disabled'}>` : ''}</td>
       <td>${j === 0 ? fmtDate(p.data) : ''}</td><td style="white-space:normal; min-width:220px;">${j === 0 ? escR(p.descrizione) + `<div class="muted" style="font-size:10.5px;">${escR(p.regola.nome)}</div>` : ''}${j === 0 && p.problemi.length ? `<div style="color:var(--red); font-size:11px;">${escR(p.problemi.join(' · '))}</div>` : ''}</td>
       <td style="white-space:normal; min-width:200px;${r.conto ? '' : ' color:var(--red);'}">${r.conto ? escR(nomeContoGenerale(r.conto)) : (r.fix
-        ? `<select data-fix="${i}" data-fix-tipo="${r.fix}" style="max-width:260px;" title="${r.fix === 'righe' ? 'Assegna il conto a tutte le righe di questa fattura senza conto' : 'Assegna il conto a questo movimento'}"><option value="">(da assegnare)</option></select>`
+        ? `<input type="text" list="anteConti" data-fix="${i}" data-fix-tipo="${r.fix}" placeholder="scrivi per cercare il conto…" style="width:270px; padding:4px;" title="${r.fix === 'righe' ? 'Assegna il conto a tutte le righe di questa fattura senza conto' : 'Assegna il conto a questo movimento'}">`
         : '— manca —')}${r.controparte ? `<div class="muted" style="font-size:10.5px;">${escR(r.controparte)}</div>` : ''}</td>
       <td class="num" style="white-space:nowrap;">${r.dare ? fmtEUR(r.dare) : ''}</td><td class="num" style="white-space:nowrap;">${r.avere ? fmtEUR(r.avere) : ''}</td></tr>`).join(''); }).join('');
   box.innerHTML = `<h2>Anteprima scritture — ${escR(ORIGINI_SCRITTURE[origine].label)}</h2>
@@ -14289,7 +14290,7 @@ function apriAnteprimaScritture(esito, origine) {
       <button type="button" class="btn secondary" id="antePrec">◀</button><span class="muted" id="antePag"></span><button type="button" class="btn secondary" id="anteSucc">▶</button>
       <button type="button" class="btn" id="anteRegistra">Registra selezionate</button><span class="muted" id="anteSel"></span></div>
     <div class="status" id="anteStatus"></div>
-    <div style="max-height:60vh; overflow:auto;"><table class="data" style="width:100%;"><thead><tr><th></th><th>Data</th><th>Descrizione / regola</th><th>Conto</th><th class="num">Dare</th><th class="num">Avere</th></tr></thead><tbody id="anteCorpo"></tbody></table></div>`;
+    <div style="max-height:60vh; overflow:auto;"><table class="data" style="width:100%;"><thead><tr><th></th><th>Data</th><th>Descrizione / regola</th><th>Conto</th><th class="num">Dare</th><th class="num">Avere</th></tr></thead><tbody id="anteCorpo"></tbody></table></div><datalist id="anteConti"></datalist>`;
   const cornice = box.parentElement;
   cornice.style.maxWidth = 'min(1200px, 96vw)';
   const chiudi = () => { overlay.style.display = 'none'; box.innerHTML = ''; cornice.style.maxWidth = '1000px'; };
@@ -14305,25 +14306,20 @@ function apriAnteprimaScritture(esito, origine) {
     document.getElementById('antePag').textContent = `${nVis} scritture · pagina ${pagina + 1} di ${nPag}`;
     document.getElementById('anteCorpo').innerHTML = corpo();
     box.querySelectorAll('[data-ante]').forEach(c => c.addEventListener('change', () => { c.checked ? scelte.add(Number(c.dataset.ante)) : scelte.delete(Number(c.dataset.ante)); agg(); }));
-    box.querySelectorAll('[data-fix]').forEach(sl => sl.addEventListener('mousedown', () => {
-      if (sl.dataset.pieno) return;
-      sl.innerHTML = opzioniMastri(); sl.dataset.pieno = '1';
-    }));
     box.querySelectorAll('[data-fix]').forEach(sl => sl.addEventListener('change', async () => {
       if (!sl.value) return;
-      if (sl.value === '__nuova__') {
+      let conto = (/\((\d\d\.\d{4})\)\s*$/.exec(sl.value) || [])[1];
+      if (sl.value.startsWith('+ Nuova')) {
         sl.disabled = true;
-        try {
-          const nuovo = await creaVoceDaAnteprima();
-          if (nuovo) { sl.innerHTML = opzioniMastri().replace('<option value="__nuova__">', `<option value="${nuovo}">${nuovo}</option><option value="__nuova__">`); sl.value = nuovo; sl.disabled = false; sl.dispatchEvent(new Event('change')); return; }
-        } catch (e) { st.className = 'status err'; st.textContent = 'Errore: ' + (e.message || e); }
-        sl.disabled = false; sl.value = ''; return;
+        try { conto = await creaVoceDaAnteprima(); riempiDatalist(); } catch (e) { st.className = 'status err'; st.textContent = 'Errore: ' + (e.message || e); }
+        sl.disabled = false;
+        if (!conto) { sl.value = ''; return; }
       }
-      if (sl.value === '__tutti__') { sl.innerHTML = contoOptionsHTML(''); try { sl.showPicker(); } catch (e) { /* si apre col clic */ } return; }
+      if (!conto) { st.className = 'status err'; st.textContent = 'Scegli una voce dall\'elenco (scrivi una parte del nome, es. "ristor").'; return; }
       const i = Number(sl.dataset.fix);
       sl.disabled = true;
       try {
-        const altre = await assegnaContoMancante(proposte[i], sl.dataset.fixTipo, sl.value, proposte);
+        const altre = await assegnaContoMancante(proposte[i], sl.dataset.fixTipo, conto, proposte);
         [proposte[i], ...altre].forEach(q => { if (q.quadra) scelte.add(proposte.indexOf(q)); });
         st.className = 'status ok'; st.textContent = altre.length ? `Conto assegnato, e applicato ad altre ${altre.length} righe uguali (stesso ${sl.dataset.fixTipo === 'righe' ? 'fornitore e descrizione' : 'testo, banca e verso'}).` : 'Conto assegnato.';
       } catch (e) { st.className = 'status err'; st.textContent = 'Errore: ' + (e.message || e); }
@@ -14335,6 +14331,7 @@ function apriAnteprimaScritture(esito, origine) {
   document.getElementById('antePrec').onclick = () => { if (pagina > 0) { pagina--; disegna(); } };
   document.getElementById('anteSucc').onclick = () => { pagina++; disegna(); };
   document.getElementById('anteTutte').onchange = e => { proposte.forEach((p, i) => { if (p.quadra) { e.target.checked ? scelte.add(i) : scelte.delete(i); } }); disegna(); };
+  riempiDatalist();
   disegna();
   document.getElementById('anteRegistra').onclick = async () => {
     const daSalvare = [...scelte].map(i => proposte[i]).filter(p => p.quadra);
@@ -14356,7 +14353,7 @@ async function generaScrittureDaUi(soloAutomatiche) {
   const st = document.getElementById('pnStatus');
   st.className = 'status'; st.textContent = 'Carico documenti e applico le regole...';
   try {
-    if (!pianoConti.length) await loadPianoConti();
+    await loadPianoConti(); // ricarica: include i conti aggiunti da poco
     const esito = await proponiScritture(origine, dal, al);
     if (!soloAutomatiche) { st.textContent = ''; apriAnteprimaScritture(esito, origine); return; }
     const pronte = esito.proposte.filter(p => p.quadra && p.regola.automatica);
