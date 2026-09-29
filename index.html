@@ -162,7 +162,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 243</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 244</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14204,6 +14204,24 @@ function nomeContoGenerale(codice) {
   return _nomiContoCache.mappa.has(codice) ? `${codice} ${_nomiContoCache.mappa.get(codice)}` : codice;
 }
 
+// crea una voce nuova nel piano dei conti: chiede il mastro (es. 51) e il nome, calcola il codice libero
+async function creaVoceDaAnteprima() {
+  const mastri = pianoConti.filter(c => /^\d\d\.0000$/.test(c.codice) && !c._altraAzienda && !/^8[2-6]\./.test(c.codice)).sort((a, b) => a.codice.localeCompare(b.codice));
+  const m = prompt('In quale mastro? Scrivi le due cifre:\n' + mastri.map(c => `${c.codice.slice(0, 2)} ${c.descrizione}`).join('\n'));
+  if (!m) return null;
+  const mastro = mastri.find(c => c.codice.slice(0, 2) === m.trim().slice(0, 2));
+  if (!mastro) { alert('Mastro non trovato.'); return null; }
+  const nome = (prompt(`Nome della nuova voce sotto "${mastro.descrizione}":`) || '').trim();
+  if (!nome) return null;
+  // codici gia' presi in entrambe le aziende (il piano e' condiviso): il nuovo non deve collidere
+  const usati = pianoConti.filter(c => c.codice.startsWith(mastro.codice.slice(0, 3))).map(c => Number(c.codice.slice(3)) || 0);
+  const codice = mastro.codice.slice(0, 3) + String(Math.max(0, ...usati) + 1).padStart(4, '0');
+  const { error } = await supabase.from('piano_conti').insert({ azienda: AZIENDA_SCRITTURA, codice, descrizione: nome, gruppo: mastro.gruppo || mastro.descrizione, sottogruppo: null });
+  if (error) throw error;
+  await loadPianoConti();
+  return codice;
+}
+
 // assegna il conto mancante direttamente dall'anteprima: righe fattura senza conto, o conto del movimento
 async function assegnaContoMancante(p, tipo, conto, tutte = []) {
   const mancante = v => v == null || v === '';
@@ -14248,7 +14266,12 @@ function apriAnteprimaScritture(esito, origine) {
   const scelte = new Set(proposte.map((p, i) => p.quadra ? i : -1).filter(i => i >= 0));
   // menu con poche voci: i mastri; in fondo "tutti i conti" per il dettaglio
   const opzioniMastri = () => '<option value="">(da assegnare)</option>' + pianoConti.filter(c => /^\d\d\.0000$/.test(c.codice) && !c._altraAzienda && !/^8[2-6]\./.test(c.codice))
-    .sort((x, y) => x.codice.localeCompare(y.codice)).map(c => `<option value="${c.codice}">${escR(c.descrizione || '')} (${c.codice})</option>`).join('') + '<option value="__tutti__">— mostra tutti i conti di dettaglio —</option>';
+    .sort((x, y) => x.codice.localeCompare(y.codice)).map(c => {
+      // le voci di dettaglio del mastro nel testo, cosi' si riconosce dove sta ad es. "Bar e ristoranti"
+      const sotto = pianoConti.filter(x => x.codice.startsWith(c.codice.slice(0, 3)) && x.codice !== c.codice && !x._altraAzienda).map(x => x.descrizione).filter(Boolean);
+      const elenco = sotto.length ? ' — ' + sotto.slice(0, 6).join(', ') + (sotto.length > 6 ? '…' : '') : '';
+      return `<option value="${c.codice}">${escR(c.descrizione || '')} (${c.codice})${escR(elenco)}</option>`;
+    }).join('') + '<option value="__nuova__">+ Nuova voce…</option><option value="__tutti__">— mostra tutti i conti di dettaglio —</option>';
   const PAG = 60;
   let pagina = 0, filtro = proposte.some(p => !p.quadra) ? 'problemi' : 'tutte';
   const visibili = () => proposte.map((p, i) => i).filter(i => filtro === 'tutte' || (filtro === 'problemi' ? !proposte[i].quadra : proposte[i].quadra));
@@ -14288,6 +14311,14 @@ function apriAnteprimaScritture(esito, origine) {
     }));
     box.querySelectorAll('[data-fix]').forEach(sl => sl.addEventListener('change', async () => {
       if (!sl.value) return;
+      if (sl.value === '__nuova__') {
+        sl.disabled = true;
+        try {
+          const nuovo = await creaVoceDaAnteprima();
+          if (nuovo) { sl.innerHTML = opzioniMastri().replace('<option value="__nuova__">', `<option value="${nuovo}">${nuovo}</option><option value="__nuova__">`); sl.value = nuovo; sl.disabled = false; sl.dispatchEvent(new Event('change')); return; }
+        } catch (e) { st.className = 'status err'; st.textContent = 'Errore: ' + (e.message || e); }
+        sl.disabled = false; sl.value = ''; return;
+      }
       if (sl.value === '__tutti__') { sl.innerHTML = contoOptionsHTML(''); try { sl.showPicker(); } catch (e) { /* si apre col clic */ } return; }
       const i = Number(sl.dataset.fix);
       sl.disabled = true;
