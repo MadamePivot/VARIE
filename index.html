@@ -162,7 +162,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 239</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 240</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14135,31 +14135,46 @@ async function proponiScritture(origine, dal, al) {
   return { proposte, senzaRegola, totaleDocs, daElaborare: docs.length };
 }
 
-async function salvaProposte(proposte) {
+async function salvaProposte(proposte, avanzamento = null) {
   let ok = 0;
   const errori = [];
-  for (const p of proposte) {
-    const { data: pn, error } = await supabase.from('prima_nota').insert({
-      azienda: p.azienda, data: p.data, descrizione: p.descrizione, origine_tabella: p.tab, origine_id: p.docId, regola_id: p.regola.id, stato: 'bozza' }).select('id').single();
-    if (error) { errori.push(`${p.descrizione}: ${error.message}`); continue; }
-    const { error: e2 } = await supabase.from('prima_nota_righe').insert(p.righe.map(r => ({ prima_nota_id: pn.id, conto: r.conto, descrizione: r.descrizione, controparte: r.controparte || null, dare: r.dare, avere: r.avere })));
-    if (e2) { await supabase.from('prima_nota').delete().eq('id', pn.id); errori.push(`${p.descrizione}: ${e2.message}`); continue; }
-    const { error: e3 } = await supabase.from('prima_nota').update({ stato: 'confermata' }).eq('id', pn.id);
-    if (e3) errori.push(`${p.descrizione}: registrata come bozza (${e3.message})`);
-    ok++;
+  const BLOCCO = 100;
+  for (let i = 0; i < proposte.length; i += BLOCCO) {
+    const blocco = proposte.slice(i, i + BLOCCO);
+    if (avanzamento) avanzamento(Math.min(i + BLOCCO, proposte.length), proposte.length);
+    const testate = blocco.map(p => ({ azienda: p.azienda, data: p.data, descrizione: p.descrizione, origine_tabella: p.tab, origine_id: p.docId, regola_id: p.regola.id, stato: 'bozza' }));
+    const { data: creati, error } = await supabase.from('prima_nota').insert(testate).select('id,origine_id');
+    if (error) { errori.push(`blocco ${i / BLOCCO + 1}: ${error.message}`); continue; }
+    const idPerDoc = new Map(creati.map(c => [c.origine_id, c.id]));
+    const righe = [];
+    blocco.forEach(p => p.righe.forEach(r => righe.push({ prima_nota_id: idPerDoc.get(p.docId), conto: r.conto, descrizione: r.descrizione, controparte: r.controparte || null, dare: r.dare, avere: r.avere })));
+    const { error: e2 } = await supabase.from('prima_nota_righe').insert(righe);
+    if (e2) { await supabase.from('prima_nota').delete().in('id', creati.map(c => c.id)); errori.push(`blocco ${i / BLOCCO + 1}: ${e2.message}`); continue; }
+    const { error: e3 } = await supabase.from('prima_nota').update({ stato: 'confermata' }).in('id', creati.map(c => c.id));
+    if (e3) {
+      // una scrittura non quadra: si confermano una per una, quelle che falliscono restano bozza
+      for (const c of creati) {
+        const { error: e4 } = await supabase.from('prima_nota').update({ stato: 'confermata' }).eq('id', c.id);
+        if (e4) errori.push(`scrittura rimasta in bozza: ${e4.message}`);
+      }
+    }
+    ok += blocco.length;
   }
   const perRegola = new Map();
   proposte.forEach(p => perRegola.set(p.regola.id, (perRegola.get(p.regola.id) || 0) + 1));
   for (const [id, n] of perRegola) {
     const r = regoleScritture.find(x => x.id === id);
-    if (r) await supabase.from('regole_scritture').update({ volte_applicata: (r.volte_applicata || 0) + n }).eq('id', id);
+    if (r) { r.volte_applicata = (r.volte_applicata || 0) + n; await supabase.from('regole_scritture').update({ volte_applicata: r.volte_applicata }).eq('id', id); }
   }
   return { ok, errori };
 }
 
+let _nomiContoCache = { rif: null, n: -1, mappa: null };
 function nomeContoGenerale(codice) {
-  const c = pianoConti.find(x => x.codice === codice);
-  return c ? `${codice} ${c.descrizione || ''}` : codice;
+  if (_nomiContoCache.rif !== pianoConti || _nomiContoCache.n !== pianoConti.length) {
+    _nomiContoCache = { rif: pianoConti, n: pianoConti.length, mappa: new Map(pianoConti.map(x => [x.codice, x.descrizione || ''])) };
+  }
+  return _nomiContoCache.mappa.has(codice) ? `${codice} ${_nomiContoCache.mappa.get(codice)}` : codice;
 }
 
 // assegna il conto mancante direttamente dall'anteprima: righe fattura senza conto, o conto del movimento
@@ -14183,17 +14198,22 @@ function apriAnteprimaScritture(esito, origine) {
   const { proposte, senzaRegola, totaleDocs } = esito;
   box.onclick = null; box.onchange = null;
   const scelte = new Set(proposte.map((p, i) => p.quadra ? i : -1).filter(i => i >= 0));
-  const opzioniConto = contoOptionsHTML('');
-  const corpo = () => proposte.map((p, i) => p.righe.map((r, j) => `<tr${p.quadra ? '' : ' style="background:#fdeaea;"'}>
+  let opzioniConto = null;
+  const PAG = 60;
+  let pagina = 0, filtro = proposte.some(p => !p.quadra) ? 'problemi' : 'tutte';
+  const visibili = () => proposte.map((p, i) => i).filter(i => filtro === 'tutte' || (filtro === 'problemi' ? !proposte[i].quadra : proposte[i].quadra));
+  const corpo = () => visibili().slice(pagina * PAG, (pagina + 1) * PAG).map(i => { const p = proposte[i]; return p.righe.map((r, j) => `<tr${p.quadra ? '' : ' style="background:#fdeaea;"'}>
       <td>${j === 0 ? `<input type="checkbox" data-ante="${i}" ${p.quadra ? (scelte.has(i) ? 'checked' : '') : 'disabled'}>` : ''}</td>
       <td>${j === 0 ? fmtDate(p.data) : ''}</td><td style="white-space:normal; min-width:220px;">${j === 0 ? escR(p.descrizione) + `<div class="muted" style="font-size:10.5px;">${escR(p.regola.nome)}</div>` : ''}${j === 0 && p.problemi.length ? `<div style="color:var(--red); font-size:11px;">${escR(p.problemi.join(' · '))}</div>` : ''}</td>
       <td style="white-space:normal; min-width:200px;${r.conto ? '' : ' color:var(--red);'}">${r.conto ? escR(nomeContoGenerale(r.conto)) : (r.fix
-        ? `<select data-fix="${i}" data-fix-tipo="${r.fix}" style="max-width:260px;" title="${r.fix === 'righe' ? 'Assegna il conto a tutte le righe di questa fattura senza conto' : 'Assegna il conto a questo movimento'}">${opzioniConto}</select>`
+        ? `<select data-fix="${i}" data-fix-tipo="${r.fix}" style="max-width:260px;" title="${r.fix === 'righe' ? 'Assegna il conto a tutte le righe di questa fattura senza conto' : 'Assegna il conto a questo movimento'}"><option value="">(da assegnare)</option></select>`
         : '— manca —')}${r.controparte ? `<div class="muted" style="font-size:10.5px;">${escR(r.controparte)}</div>` : ''}</td>
-      <td class="num" style="white-space:nowrap;">${r.dare ? fmtEUR(r.dare) : ''}</td><td class="num" style="white-space:nowrap;">${r.avere ? fmtEUR(r.avere) : ''}</td></tr>`).join('')).join('');
+      <td class="num" style="white-space:nowrap;">${r.dare ? fmtEUR(r.dare) : ''}</td><td class="num" style="white-space:nowrap;">${r.avere ? fmtEUR(r.avere) : ''}</td></tr>`).join(''); }).join('');
   box.innerHTML = `<h2>Anteprima scritture — ${escR(ORIGINI_SCRITTURE[origine].label)}</h2>
     <p class="muted" style="margin-top:0;" id="anteInfo"></p>
     <div class="toolbar"><label><input type="checkbox" id="anteTutte" checked> Seleziona tutte le pronte</label>
+      <label>Mostra: <select id="anteFiltro"><option value="tutte">tutte</option><option value="problemi">solo con problemi</option><option value="pronte">solo pronte</option></select></label>
+      <button type="button" class="btn secondary" id="antePrec">◀</button><span class="muted" id="antePag"></span><button type="button" class="btn secondary" id="anteSucc">▶</button>
       <button type="button" class="btn" id="anteRegistra">Registra selezionate</button><span class="muted" id="anteSel"></span></div>
     <div class="status" id="anteStatus"></div>
     <div style="max-height:60vh; overflow:auto;"><table class="data" style="width:100%;"><thead><tr><th></th><th>Data</th><th>Descrizione / regola</th><th>Conto</th><th class="num">Dare</th><th class="num">Avere</th></tr></thead><tbody id="anteCorpo"></tbody></table></div>`;
@@ -14206,8 +14226,17 @@ function apriAnteprimaScritture(esito, origine) {
   const disegna = () => {
     const validi = proposte.filter(p => p.quadra).length;
     document.getElementById('anteInfo').textContent = `${totaleDocs} documenti nel periodo, ${proposte.length} con una regola (${validi} pronte), ${senzaRegola} senza regola. Le righe rosa hanno un problema: dove manca un conto scegli il conto dal menu e la scrittura si ricalcola.`;
+    const nVis = visibili().length, nPag = Math.max(1, Math.ceil(nVis / PAG));
+    if (pagina >= nPag) pagina = nPag - 1;
+    document.getElementById('anteFiltro').value = filtro;
+    document.getElementById('antePag').textContent = `${nVis} scritture · pagina ${pagina + 1} di ${nPag}`;
     document.getElementById('anteCorpo').innerHTML = corpo();
     box.querySelectorAll('[data-ante]').forEach(c => c.addEventListener('change', () => { c.checked ? scelte.add(Number(c.dataset.ante)) : scelte.delete(Number(c.dataset.ante)); agg(); }));
+    box.querySelectorAll('[data-fix]').forEach(sl => sl.addEventListener('mousedown', () => {
+      if (sl.dataset.pieno) return;
+      if (opzioniConto === null) opzioniConto = contoOptionsHTML('');
+      sl.innerHTML = opzioniConto; sl.dataset.pieno = '1';
+    }));
     box.querySelectorAll('[data-fix]').forEach(sl => sl.addEventListener('change', async () => {
       if (!sl.value) return;
       const i = Number(sl.dataset.fix);
@@ -14221,6 +14250,9 @@ function apriAnteprimaScritture(esito, origine) {
     }));
     agg();
   };
+  document.getElementById('anteFiltro').onchange = e => { filtro = e.target.value; pagina = 0; disegna(); };
+  document.getElementById('antePrec').onclick = () => { if (pagina > 0) { pagina--; disegna(); } };
+  document.getElementById('anteSucc').onclick = () => { pagina++; disegna(); };
   document.getElementById('anteTutte').onchange = e => { proposte.forEach((p, i) => { if (p.quadra) { e.target.checked ? scelte.add(i) : scelte.delete(i); } }); disegna(); };
   disegna();
   document.getElementById('anteRegistra').onclick = async () => {
@@ -14228,7 +14260,7 @@ function apriAnteprimaScritture(esito, origine) {
     if (!daSalvare.length) { st.className = 'status err'; st.textContent = 'Nessuna scrittura selezionata.'; return; }
     document.getElementById('anteRegistra').disabled = true;
     st.className = 'status'; st.textContent = `Registro ${daSalvare.length} scritture...`;
-    const { ok, errori } = await salvaProposte(daSalvare);
+    const { ok, errori } = await salvaProposte(daSalvare, (n, tot) => { st.textContent = `Registro scritture: ${n} di ${tot}...`; });
     st.className = errori.length ? 'status err' : 'status ok';
     st.textContent = `Registrate ${ok} scritture.` + (errori.length ? ` Errori (${errori.length}): ${errori.slice(0, 3).join(' | ')}` : '');
     loadPrimaNota();
