@@ -162,7 +162,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 234</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 235</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14167,15 +14167,16 @@ function apriAnteprimaScritture(esito, origine) {
     <div class="toolbar"><label><input type="checkbox" id="anteTutte" checked> Seleziona tutte le pronte</label>
       <button type="button" class="btn" id="anteRegistra">Registra selezionate</button><span class="muted" id="anteSel"></span></div>
     <div class="status" id="anteStatus"></div>
-    <div style="max-height:55vh; overflow:auto;"><table class="data"><thead><tr><th></th><th>Data</th><th>Descrizione</th><th>Regola</th><th>Conto</th><th class="num">Dare</th><th class="num">Avere</th></tr></thead><tbody>
+    <div style="max-height:60vh; overflow:auto;"><table class="data" style="width:100%;"><thead><tr><th></th><th>Data</th><th>Descrizione / regola</th><th>Conto</th><th class="num">Dare</th><th class="num">Avere</th></tr></thead><tbody>
     ${proposte.map((p, i) => p.righe.map((r, j) => `<tr${p.quadra ? '' : ' style="background:#fdeaea;"'}>
       <td>${j === 0 ? `<input type="checkbox" data-ante="${i}" ${p.quadra ? 'checked' : 'disabled'}>` : ''}</td>
-      <td>${j === 0 ? fmtDate(p.data) : ''}</td><td style="white-space:normal;">${j === 0 ? escR(p.descrizione) : ''}${j === 0 && p.problemi.length ? `<div style="color:var(--red); font-size:11px;">${escR(p.problemi.join(' · '))}</div>` : ''}</td>
-      <td>${j === 0 ? escR(p.regola.nome) : ''}</td>
-      <td style="white-space:normal;${r.conto ? '' : ' color:var(--red);'}">${escR(r.conto ? nomeContoGenerale(r.conto) : '— manca —')}${r.controparte ? `<div class="muted" style="font-size:10.5px;">${escR(r.controparte)}</div>` : ''}</td>
-      <td class="num">${r.dare ? fmtEUR(r.dare) : ''}</td><td class="num">${r.avere ? fmtEUR(r.avere) : ''}</td></tr>`).join('')).join('')}
+      <td>${j === 0 ? fmtDate(p.data) : ''}</td><td style="white-space:normal; min-width:220px;">${j === 0 ? escR(p.descrizione) + `<div class="muted" style="font-size:10.5px;">${escR(p.regola.nome)}</div>` : ''}${j === 0 && p.problemi.length ? `<div style="color:var(--red); font-size:11px;">${escR(p.problemi.join(' · '))}</div>` : ''}</td>
+      <td style="white-space:normal; min-width:200px;${r.conto ? '' : ' color:var(--red);'}">${escR(r.conto ? nomeContoGenerale(r.conto) : '— manca —')}${r.controparte ? `<div class="muted" style="font-size:10.5px;">${escR(r.controparte)}</div>` : ''}</td>
+      <td class="num" style="white-space:nowrap;">${r.dare ? fmtEUR(r.dare) : ''}</td><td class="num" style="white-space:nowrap;">${r.avere ? fmtEUR(r.avere) : ''}</td></tr>`).join('')).join('')}
     </tbody></table></div>`;
-  const chiudi = () => { overlay.style.display = 'none'; box.innerHTML = ''; };
+  const cornice = box.parentElement;
+  cornice.style.maxWidth = 'min(1200px, 96vw)';
+  const chiudi = () => { overlay.style.display = 'none'; box.innerHTML = ''; cornice.style.maxWidth = '1000px'; };
   document.getElementById('modalAutomatismiClose').onclick = chiudi;
   const sel = () => [...box.querySelectorAll('[data-ante]:checked')].map(c => proposte[Number(c.dataset.ante)]);
   const agg = () => { document.getElementById('anteSel').textContent = `${sel().length} selezionate`; };
