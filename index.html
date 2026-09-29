@@ -162,7 +162,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 240</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 241</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -885,8 +885,8 @@
       <p class="muted">Scritture in partita doppia generate dalle <strong>Regole scritture</strong> a partire da fatture di acquisto, fatture di vendita, movimenti bancari e movimenti carta. Ogni scrittura deve quadrare (dare = avere) per essere confermata. Un documento già registrato non viene proposto una seconda volta.</p>
       <div class="toolbar" style="flex-wrap:wrap;">
         <label>Origine: <select id="pnOrigine"><option value="fattura_acquisto">Fatture acquisto</option><option value="fattura_vendita">Fatture vendita</option><option value="movimento_banca">Movimenti bancari</option><option value="movimento_carta">Movimenti carta</option></select></label>
-        <label>Dal: <input type="date" id="pnDal"></label>
-        <label>Al: <input type="date" id="pnAl"></label>
+        <label>Dal: <input type="date" id="pnDal" value="2021-05-03"></label>
+        <label>Al: <input type="date" id="pnAl" value="2021-05-31"></label>
         <button class="btn" id="btnPnGenera">Genera scritture (anteprima)</button>
         <button class="btn" id="btnPnElaboraTutto" title="Per tutte e quattro le origini: registra le scritture delle regole Automatiche che quadrano e mostra cosa resta da controllare">Elabora tutto</button>
         <button class="btn secondary" id="btnPnAutomatiche" title="Registra subito, senza anteprima, solo le scritture di regole marcate Automatica e che quadrano">Registra automatiche</button>
@@ -14089,10 +14089,15 @@ async function caricaDocumentiPerScritture(origine, dal, al) {
   if (acq || vend) {
     const tabR = acq ? 'righe_fattura' : 'righe_fattura_vendita';
     const ids = nuovi.map(x => x.id);
-    for (let i = 0; i < ids.length; i += 150) {
-      const { data, error: e3 } = await fetchTutteLeRighe(() => supabase.from(tabR).select('fattura_id,prezzo_totale,codice_conto').in('fattura_id', ids.slice(i, i + 150)).order('id'));
-      if (e3) throw e3;
-      (data || []).forEach(r => { if (!righePerDoc.has(r.fattura_id)) righePerDoc.set(r.fattura_id, []); righePerDoc.get(r.fattura_id).push(r); });
+    const blocchi = [];
+    for (let i = 0; i < ids.length; i += 100) blocchi.push(ids.slice(i, i + 100));
+    // richieste in parallelo, 4 alla volta
+    for (let i = 0; i < blocchi.length; i += 4) {
+      const esiti = await Promise.all(blocchi.slice(i, i + 4).map(b => fetchTutteLeRighe(() => supabase.from(tabR).select('fattura_id,prezzo_totale,codice_conto').in('fattura_id', b).order('id'))));
+      for (const { data, error: e3 } of esiti) {
+        if (e3) throw e3;
+        (data || []).forEach(r => { if (!righePerDoc.has(r.fattura_id)) righePerDoc.set(r.fattura_id, []); righePerDoc.get(r.fattura_id).push(r); });
+      }
     }
   }
   // movimenti: fattura collegata (pagamenti_fatture) e nome del fornitore/cliente, per le regole "collegato a fattura"

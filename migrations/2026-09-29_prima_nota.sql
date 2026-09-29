@@ -74,3 +74,10 @@ alter table regole_scritture add column if not exists collegamento text check (c
 
 -- gruppi di regole (si confermano insieme)
 alter table regole_scritture add column if not exists gruppo text;
+
+-- indici per la velocita' (righe_fattura non aveva indice su fattura_id)
+create index if not exists idx_rf_fattura_id on righe_fattura(fattura_id);
+create index if not exists idx_fatture_azienda_data on fatture(azienda, data);
+create index if not exists idx_fatture_vendita_azienda_data on fatture_vendita(azienda, data);
+create index if not exists idx_mb_azienda_data on movimenti_bancari(azienda, data_operazione);
+create index if not exists idx_mc_azienda_data on movimenti_carta(azienda, data_operazione);
