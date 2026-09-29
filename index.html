@@ -162,7 +162,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 248</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 249</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -914,7 +914,7 @@
       </div>
       <div class="table-wrap"><div id="regoleScrTable"></div></div>
       <h3 style="margin:18px 0 4px;">Assegnazioni automatiche del conto (righe fattura)</h3>
-      <p class="muted" style="margin:0 0 8px;">Nascono quando assegni un conto a una riga dall'anteprima: <em>fornitore/cliente + descrizione → conto</em>. Valgono per tutte le righe uguali, passate e future.</p>
+      <p class="muted" style="margin:0 0 8px;">Nascono quando assegni un conto a una riga senza conto dall'anteprima: <em>fornitore/cliente + descrizione → conto</em>. Servono solo alle scritture di prima nota (di solito basta il mastro): <strong>non modificano le righe delle fatture</strong>, il cui dettaglio per l'analisi costi resta com'è.</p>
       <div class="table-wrap"><div id="regoleAssTable"></div></div>
     </div>
   </section>
@@ -14069,7 +14069,7 @@ function costruisciScrittura(regola, origine, d) {
       const perMastro = t.livello !== 'dettaglio';
       const gruppi = new Map();
       d.righe.forEach(rg => {
-        const c = rg.codice_conto || '';
+        const c = rg.conto_pn || '';
         const m = c && perMastro ? mastroDi(c) : c;
         const g = gruppi.get(m) || { imp: 0, dettaglio: new Map() };
         const imp = Number(rg.prezzo_totale) || 0;
@@ -14152,16 +14152,23 @@ async function caricaDocumentiPerScritture(origine, dal, al) {
 async function proponiScritture(origine, dal, al) {
   const regole = await loadRegoleScritture(true);
   if (!pianoConti.length) await loadPianoConti();
-  // assegna da sole le righe fattura senza conto per cui esiste una regola (fornitore + descrizione)
+  // conto "per la prima nota" delle righe fattura senza conto: viene dalle regole fornitore/cliente -> conto e vale solo
+  // per le scritture. Le righe fattura NON vengono modificate: il loro dettaglio (analisi costi) resta com'e'.
+  const mappaAss = new Map();
   if (origine === 'fattura_acquisto' || origine === 'fattura_vendita') {
-    const { error: eAr } = await supabase.rpc('applica_regole_assegnazione');
-    if (eAr) console.warn('applica_regole_assegnazione:', eAr.message);
+    const { data: ra } = await fetchTutteLeRighe(() => supabase.from('regole_assegnazione_righe').select('*').eq('attiva', true).order('id'));
+    (ra || []).forEach(g => mappaAss.set(`${g.azienda}|${g.tabella}|${g.controparte}|${g.descrizione}`, g.codice_conto));
   }
+  window._mappaAssegnazioni = mappaAss;
   const { tab, docs, righePerDoc, collegamenti, totaleDocs } = await caricaDocumentiPerScritture(origine, dal, al);
   const proposte = [];
   let senzaRegola = 0;
   for (const doc of docs) {
-    const d = datiScrittura(origine, doc, righePerDoc.get(doc.id) || [], collegamenti.get(doc.id) || null);
+    const nomeCp = origine === 'fattura_acquisto' ? doc.fornitore_denominazione : origine === 'fattura_vendita' ? doc.cliente_denominazione : null;
+    const tabRiga = origine === 'fattura_acquisto' ? 'righe_fattura' : 'righe_fattura_vendita';
+    const righeDoc = (righePerDoc.get(doc.id) || []).map(r => ({ ...r,
+      conto_pn: r.codice_conto || mappaAss.get(`${doc.azienda}|${tabRiga}|${nomeCp}|${r.descrizione}`) || mappaAss.get(`${doc.azienda}|${tabRiga}|${nomeCp}|`) || '' }));
+    const d = datiScrittura(origine, doc, righeDoc, collegamenti.get(doc.id) || null);
     const regola = regole.find(r => regolaScritturaCorrisponde(r, origine, d));
     if (!regola) { senzaRegola++; continue; }
     const s = costruisciScrittura(regola, origine, d);
@@ -14236,25 +14243,19 @@ async function assegnaContoMancante(p, tipo, conto, tutte = [], perFornitore = f
   let altre = [];
   if (tipo === 'righe') {
     const tabR = p.origine === 'fattura_acquisto' ? 'righe_fattura' : 'righe_fattura_vendita';
-    const { error } = await supabase.from(tabR).update({ codice_conto: conto }).eq('fattura_id', p.docId).or('codice_conto.is.null,codice_conto.eq.');
-    if (error) throw error;
-    // stesse righe di altre fatture dello stesso fornitore/cliente (stessa descrizione) nell'anteprima
-    const descr = [...new Set(p.d.righe.filter(r => mancante(r.codice_conto) && r.descrizione).map(r => r.descrizione))];
-    p.d.righe.forEach(r => { if (mancante(r.codice_conto)) r.codice_conto = conto; });
+    // le righe fattura non si toccano (il dettaglio serve all'analisi costi): si salva solo la regola
+    // fornitore/cliente (+ descrizione) -> conto, usata per le scritture di prima nota
+    const descr = [...new Set(p.d.righe.filter(r => mancante(r.conto_pn) && r.descrizione).map(r => r.descrizione))];
+    p.d.righe.forEach(r => { if (mancante(r.conto_pn)) r.conto_pn = conto; });
     altre = (descr.length || perFornitore) ? tutte.filter(q => q !== p && q.origine === p.origine && q.d.controparte === p.d.controparte
-      && q.d.righe.some(r => mancante(r.codice_conto) && (perFornitore || descr.includes(r.descrizione)))) : [];
-    // regola durevole: fornitore/cliente + descrizione -> conto, applicata a TUTTE le righe uguali dell'archivio
-    // (qualsiasi periodo) e alle fatture che arriveranno
+      && q.d.righe.some(r => mancante(r.conto_pn) && (perFornitore || descr.includes(r.descrizione)))) : [];
     if ((descr.length || perFornitore) && p.d.controparte) {
       // fornitore ricorrente: una sola regola con descrizione vuota = tutte le sue righe (quelle con descrizione precisa vincono)
       const regole = (perFornitore ? [''] : descr).map(d => ({ azienda: p.azienda, tabella: tabR, controparte: p.d.controparte, descrizione: d, codice_conto: conto, attiva: true }));
       const { error: eR } = await supabase.from('regole_assegnazione_righe').upsert(regole, { onConflict: 'azienda,tabella,controparte,descrizione' });
       if (eR) throw eR;
-      const { data: nTot, error: eA } = await supabase.rpc('applica_regole_assegnazione', { p_azienda: p.azienda });
-      if (eA) throw eA;
-      p.d.applicateArchivio = Number(nTot) || 0;
     }
-    altre.forEach(q => q.d.righe.forEach(r => { if (mancante(r.codice_conto) && (perFornitore || descr.includes(r.descrizione))) r.codice_conto = conto; }));
+    altre.forEach(q => q.d.righe.forEach(r => { if (mancante(r.conto_pn) && (perFornitore || descr.includes(r.descrizione))) r.conto_pn = conto; }));
   } else {
     const { error } = await supabase.from(p.tab).update({ codice_conto: conto, riconciliato: true }).eq('id', p.docId);
     if (error) throw error;
@@ -14350,7 +14351,7 @@ async function apriAnteprimaScritture(esito, origine) {
         [proposte[i], ...altre].forEach(q => { if (q.quadra) scelte.add(proposte.indexOf(q)); });
         const tot = proposte[i].d.applicateArchivio;
         st.className = 'status ok';
-        st.textContent = `Conto assegnato e regola salvata` + (tot ? `: applicato a ${tot} righe uguali in tutto l'archivio` : '') + (altre.length ? ` (${altre.length} scritture dell'anteprima aggiornate)` : '') + '. Le prossime righe uguali le assegno da solo.';
+        st.textContent = `Regola salvata: vale per le scritture` + (altre.length ? ` (${altre.length} scritture dell'anteprima aggiornate)` : '') + '. Le righe della fattura non sono state modificate. Le prossime righe uguali le assegno da solo.';
       } catch (e) { st.className = 'status err'; st.textContent = 'Errore: ' + (e.message || e); }
       disegna();
     };
