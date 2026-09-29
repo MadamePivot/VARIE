@@ -65,3 +65,7 @@ alter table prima_nota_righe enable row level security;
 create policy regole_scritture_all on regole_scritture for all using (true) with check (true);
 create policy prima_nota_all on prima_nota for all using (true) with check (true);
 create policy prima_nota_righe_all on prima_nota_righe for all using (true) with check (true);
+
+-- partitario fornitori/clienti: nome della controparte sulla riga di scrittura
+alter table prima_nota_righe add column if not exists controparte text;
+create index if not exists prima_nota_righe_controparte on prima_nota_righe(controparte);

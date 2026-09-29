@@ -904,7 +904,7 @@
   <section id="tab-regoleScritture">
     <div class="card">
       <h2>Regole scritture</h2>
-      <p class="muted">Ogni regola dice: <em>se un documento o movimento ha queste caratteristiche, registra questa scrittura in partita doppia</em>. Le righe della scrittura indicano il conto, il lato (dare/avere) e l'importo (totale, imponibile, IVA o importo del movimento). Conti speciali: <code>@RIGHE</code> = conto di ogni riga fattura, <code>@CONTROPARTE</code> = conto del fornitore/cliente cercato per nome, <code>@MOVIMENTO</code> = conto assegnato al movimento. Le regole si controllano per priorità e vince la prima che corrisponde.</p>
+      <p class="muted">Ogni regola dice: <em>se un documento o movimento ha queste caratteristiche, registra questa scrittura in partita doppia</em>. Le righe della scrittura indicano il conto, il lato (dare/avere) e l'importo (totale, imponibile, IVA o importo del movimento). I conti sono quelli del vostro Piano dei Conti. Conti speciali: <code>@RIGHE</code> = conto assegnato a ogni riga fattura, <code>@MOVIMENTO</code> = conto assegnato al movimento. La spunta <strong>partitario</strong> su una riga (es. Debiti verso fornitori) salva anche il nome del fornitore/cliente, così si ricostruisce la partita di ciascuno. Le regole si controllano per priorità e vince la prima che corrisponde.</p>
       <div class="toolbar">
         <button class="btn" id="btnNuovaRegolaScr">+ Nuova regola</button>
         <button class="btn secondary" id="btnRefreshRegoleScr">Aggiorna</button>
@@ -13994,21 +13994,6 @@ async function loadRegoleScritture(forza = false) {
   return regoleScritture;
 }
 
-function contiContropartePerPrefisso(prefisso) {
-  return pianoContiMexal.filter(c => c.codice.startsWith(prefisso));
-}
-// cerca per nome (parole significative, ordine indifferente) il conto del fornitore (410) o cliente (205)
-function trovaContoControparte(nome, origine) {
-  const chiave = normalizzaControparte(nome || '');
-  if (!chiave) return null;
-  const prefissi = origine === 'fattura_acquisto' ? ['410.'] : origine === 'fattura_vendita' ? ['205.'] : ['410.', '205.'];
-  for (const p of prefissi) {
-    const trovati = contiContropartePerPrefisso(p).filter(c => normalizzaControparte(c.descrizione || '') === chiave);
-    if (trovati.length === 1) return trovati[0].codice;
-  }
-  return null;
-}
-
 // dati normalizzati di un documento/movimento per il confronto con le regole e il calcolo degli importi
 function datiScrittura(origine, doc, righe) {
   if (origine === 'fattura_acquisto' || origine === 'fattura_vendita') {
@@ -14029,7 +14014,7 @@ function datiScrittura(origine, doc, righe) {
     totale: imp, imponibile: imp, iva: 0, importo: imp, nota_credito: false, tipoDoc: '', righe: [],
     verso: dare > 0 ? 'dare' : 'avere', banca: String((carta ? doc.carta : doc.banca) || '').toUpperCase(),
     numeroConto: String(doc.numero_conto || '').replace(/\s+/g, '').toUpperCase(),
-    contoMovimento: doc.conto_generale || doc.codice_conto || null };
+    contoMovimento: doc.codice_conto || null };
 }
 
 function regolaScritturaCorrisponde(r, origine, d) {
@@ -14054,29 +14039,27 @@ function costruisciScrittura(regola, origine, d) {
   const inverti = d.nota_credito;
   for (const t of (regola.righe || [])) {
     const lato = inverti ? (t.lato === 'dare' ? 'avere' : 'dare') : t.lato;
-    const aggiungi = (conto, importo, descr) => {
+    const aggiungi = (conto, importo, descr, controparte = null) => {
       importo = r2(importo);
       if (!importo) return;
       if (!conto) problemi.push('conto mancante: ' + descr);
-      out.push({ conto: conto || '', descrizione: descr, dare: lato === 'dare' ? importo : 0, avere: lato === 'avere' ? importo : 0 });
+      out.push({ conto: conto || '', descrizione: descr, controparte, dare: lato === 'dare' ? importo : 0, avere: lato === 'avere' ? importo : 0 });
     };
     if (t.conto === '@RIGHE') {
       const gruppi = new Map();
-      d.righe.forEach(rg => gruppi.set(rg.conto_generale || '', r2((gruppi.get(rg.conto_generale || '') || 0) + (Number(rg.prezzo_totale) || 0))));
-      gruppi.forEach((imp, conto) => aggiungi(conto, imp, conto ? 'righe fattura' : 'righe fattura senza conto generale'));
+      d.righe.forEach(rg => gruppi.set(rg.codice_conto || '', r2((gruppi.get(rg.codice_conto || '') || 0) + (Number(rg.prezzo_totale) || 0))));
+      gruppi.forEach((imp, conto) => aggiungi(conto, imp, conto ? 'righe fattura' : 'righe fattura senza conto'));
       continue;
     }
     let conto = t.conto;
     if (conto === '@MOVIMENTO') conto = d.contoMovimento;
-    else if (conto === '@CONTROPARTE') conto = trovaContoControparte(d.controparte, origine);
-    const descr = conto === null && t.conto === '@CONTROPARTE' ? `controparte "${d.controparte || ''}" non trovata nel piano conti` : (t.descrizione || IMPORTI_SCRITTURE[t.importo] || '');
-    aggiungi(conto, d[t.importo] || 0, descr);
+    aggiungi(conto, d[t.importo] || 0, t.descrizione || IMPORTI_SCRITTURE[t.importo] || '', t.partitario ? (d.controparte || '') : null);
   }
   const dare = r2(out.reduce((s, r) => s + r.dare, 0)), avere = r2(out.reduce((s, r) => s + r.avere, 0));
   if (!out.length) problemi.push('nessuna riga generata');
   const quadra = dare === avere && dare > 0;
   if (!quadra && out.length) problemi.push(`non quadra: dare ${fmtEUR(dare)} ≠ avere ${fmtEUR(avere)}`);
-  return { righe: out, problemi, quadra: quadra && !problemi.some(p => p.startsWith('conto mancante') || p.startsWith('controparte')), dare, avere };
+  return { righe: out, problemi, quadra: quadra && !problemi.some(p => p.startsWith('conto mancante')), dare, avere };
 }
 
 async function caricaDocumentiPerScritture(origine, dal, al) {
@@ -14100,7 +14083,7 @@ async function caricaDocumentiPerScritture(origine, dal, al) {
     const tabR = acq ? 'righe_fattura' : 'righe_fattura_vendita';
     const ids = nuovi.map(x => x.id);
     for (let i = 0; i < ids.length; i += 150) {
-      const { data, error: e3 } = await fetchTutteLeRighe(() => supabase.from(tabR).select('fattura_id,prezzo_totale,conto_generale').in('fattura_id', ids.slice(i, i + 150)).order('id'));
+      const { data, error: e3 } = await fetchTutteLeRighe(() => supabase.from(tabR).select('fattura_id,prezzo_totale,codice_conto').in('fattura_id', ids.slice(i, i + 150)).order('id'));
       if (e3) throw e3;
       (data || []).forEach(r => { if (!righePerDoc.has(r.fattura_id)) righePerDoc.set(r.fattura_id, []); righePerDoc.get(r.fattura_id).push(r); });
     }
@@ -14109,7 +14092,8 @@ async function caricaDocumentiPerScritture(origine, dal, al) {
 }
 
 async function proponiScritture(origine, dal, al) {
-  const [regole] = await Promise.all([loadRegoleScritture(true), assicuraPianoContiMexal()]);
+  const regole = await loadRegoleScritture(true);
+  if (!pianoConti.length) await loadPianoConti();
   const { tab, docs, righePerDoc, totaleDocs } = await caricaDocumentiPerScritture(origine, dal, al);
   const proposte = [];
   let senzaRegola = 0;
@@ -14130,7 +14114,7 @@ async function salvaProposte(proposte) {
     const { data: pn, error } = await supabase.from('prima_nota').insert({
       azienda: p.azienda, data: p.data, descrizione: p.descrizione, origine_tabella: p.tab, origine_id: p.docId, regola_id: p.regola.id, stato: 'bozza' }).select('id').single();
     if (error) { errori.push(`${p.descrizione}: ${error.message}`); continue; }
-    const { error: e2 } = await supabase.from('prima_nota_righe').insert(p.righe.map(r => ({ prima_nota_id: pn.id, conto: r.conto, descrizione: r.descrizione, dare: r.dare, avere: r.avere })));
+    const { error: e2 } = await supabase.from('prima_nota_righe').insert(p.righe.map(r => ({ prima_nota_id: pn.id, conto: r.conto, descrizione: r.descrizione, controparte: r.controparte || null, dare: r.dare, avere: r.avere })));
     if (e2) { await supabase.from('prima_nota').delete().eq('id', pn.id); errori.push(`${p.descrizione}: ${e2.message}`); continue; }
     const { error: e3 } = await supabase.from('prima_nota').update({ stato: 'confermata' }).eq('id', pn.id);
     if (e3) errori.push(`${p.descrizione}: registrata come bozza (${e3.message})`);
@@ -14146,7 +14130,7 @@ async function salvaProposte(proposte) {
 }
 
 function nomeContoGenerale(codice) {
-  const c = pianoConti.find(x => x.codice === codice) || pianoContiMexal.find(x => x.codice === codice);
+  const c = pianoConti.find(x => x.codice === codice);
   return c ? `${codice} ${c.descrizione || ''}` : codice;
 }
 
@@ -14166,7 +14150,7 @@ function apriAnteprimaScritture(esito, origine) {
       <td>${j === 0 ? `<input type="checkbox" data-ante="${i}" ${p.quadra ? 'checked' : 'disabled'}>` : ''}</td>
       <td>${j === 0 ? fmtDate(p.data) : ''}</td><td style="white-space:normal;">${j === 0 ? escR(p.descrizione) : ''}${j === 0 && p.problemi.length ? `<div style="color:var(--red); font-size:11px;">${escR(p.problemi.join(' · '))}</div>` : ''}</td>
       <td>${j === 0 ? escR(p.regola.nome) : ''}</td>
-      <td style="white-space:normal;${r.conto ? '' : ' color:var(--red);'}">${escR(r.conto ? nomeContoGenerale(r.conto) : '— manca —')}</td>
+      <td style="white-space:normal;${r.conto ? '' : ' color:var(--red);'}">${escR(r.conto ? nomeContoGenerale(r.conto) : '— manca —')}${r.controparte ? `<div class="muted" style="font-size:10.5px;">${escR(r.controparte)}</div>` : ''}</td>
       <td class="num">${r.dare ? fmtEUR(r.dare) : ''}</td><td class="num">${r.avere ? fmtEUR(r.avere) : ''}</td></tr>`).join('')).join('')}
     </tbody></table></div>`;
   const chiudi = () => { overlay.style.display = 'none'; box.innerHTML = ''; };
@@ -14214,7 +14198,6 @@ async function loadPrimaNota() {
   el.innerHTML = '<p class="muted">Caricamento...</p>';
   try {
     if (!pianoConti.length) await loadPianoConti();
-    await assicuraPianoContiMexal();
     const stato = document.getElementById('pnFiltroStato').value;
     const cerca = document.getElementById('pnCerca').value.trim().toLowerCase();
     const { data: testate, error } = await fetchTutteLeRighe(() => {
@@ -14239,7 +14222,7 @@ async function loadPrimaNota() {
     el.innerHTML = `<table class="data"><thead><tr><th>Data</th><th>Descrizione</th><th>Conto</th><th class="num">Dare</th><th class="num">Avere</th><th>Stato</th><th></th></tr></thead><tbody>
       ${mostrate.map(t => (perTestata.get(t.id) || []).map((r, j) => `<tr${j === 0 ? ' style="border-top:2px solid var(--line);"' : ''}>
         <td>${j === 0 ? fmtDate(t.data) : ''}</td><td style="white-space:normal; max-width:300px;">${j === 0 ? escR(t.descrizione) : ''}</td>
-        <td style="white-space:normal;">${escR(nomeContoGenerale(r.conto))}</td>
+        <td style="white-space:normal;">${escR(nomeContoGenerale(r.conto))}${r.controparte ? `<div class="muted" style="font-size:10.5px;">${escR(r.controparte)}</div>` : ''}</td>
         <td class="num dare">${Number(r.dare) ? fmtEUR(r.dare) : ''}</td><td class="num avere">${Number(r.avere) ? fmtEUR(r.avere) : ''}</td>
         <td>${j === 0 ? `<span class="pill">${t.stato}</span>` : ''}</td>
         <td>${j === 0 ? `<button type="button" class="btn secondary" style="padding:2px 8px; font-size:11px; color:var(--red);" data-pn-elimina="${t.id}">Elimina</button>` : ''}</td></tr>`).join('')).join('')}
@@ -14258,7 +14241,6 @@ async function loadRegoleScrittureTab() {
   el.innerHTML = '<p class="muted">Caricamento...</p>';
   try {
     if (!pianoConti.length) await loadPianoConti();
-    await assicuraPianoContiMexal();
     const regole = await loadRegoleScritture(true);
     document.getElementById('regoleScrCount').textContent = `${regole.length} regole (${regole.filter(r => r.attiva).length} attive)`;
     el.innerHTML = `<table class="data"><thead><tr><th>Attiva</th><th class="num">Priorità</th><th>Nome</th><th>Origine</th><th>Condizioni</th><th>Scrittura</th><th>Auto</th><th class="num">Usata</th><th></th></tr></thead><tbody>
@@ -14268,7 +14250,7 @@ async function loadRegoleScrittureTab() {
         return `<tr${r.attiva ? '' : ' style="opacity:.5;"'}><td><input type="checkbox" data-rs-attiva="${r.id}" ${r.attiva ? 'checked' : ''}></td><td class="num">${r.priorita}</td>
         <td style="white-space:normal;">${escR(r.nome)}${r.note ? `<div class="muted" style="font-size:10.5px;">${escR(r.note)}</div>` : ''}</td>
         <td>${escR(ORIGINI_SCRITTURE[r.origine]?.label || r.origine)}</td><td style="white-space:normal; max-width:240px;">${escR(cond.join(' · ') || 'tutti')}</td>
-        <td style="white-space:normal;">${(r.righe || []).map(t => `${t.lato === 'dare' ? 'D' : 'A'} ${escR(t.conto.startsWith('@') ? t.conto : nomeContoGenerale(t.conto))} (${IMPORTI_SCRITTURE[t.importo] || t.importo})`).join('<br>')}</td>
+        <td style="white-space:normal;">${(r.righe || []).map(t => `${t.lato === 'dare' ? 'D' : 'A'} ${escR(t.conto.startsWith('@') ? t.conto : nomeContoGenerale(t.conto))} (${IMPORTI_SCRITTURE[t.importo] || t.importo})${t.partitario ? ' · partitario' : ''}`).join('<br>')}</td>
         <td>${r.automatica ? '<span class="pill" style="background:#d9ead0;">auto</span>' : ''}</td><td class="num">${r.volte_applicata || 0}</td>
         <td><button type="button" class="btn secondary" style="padding:2px 8px; font-size:11px;" data-rs-modifica="${r.id}">Modifica</button></td></tr>`;
       }).join('')}</tbody></table>`;
@@ -14288,11 +14270,12 @@ function apriModaleRegolaScrittura(regola) {
   const opt = (val, lbl, sel) => `<option value="${escR(val)}" ${String(sel || '') === String(val) ? 'selected' : ''}>${escR(lbl)}</option>`;
   const campo = (lbl, html, aiuto) => `<label style="display:block; margin-bottom:10px;"><span style="display:block; font-weight:600; font-size:12px;">${lbl}</span>${html}${aiuto ? `<span class="muted" style="font-size:11px;">${aiuto}</span>` : ''}</label>`;
   const inp = (id, val, ph = '') => `<input type="text" id="${id}" value="${escR(val || '')}" placeholder="${escR(ph)}" style="width:100%; padding:5px;">`;
-  const contoOpts = sel => `<option value="">— conto —</option><optgroup label="Speciali">${opt('@RIGHE', '@RIGHE — conto di ogni riga fattura', sel)}${opt('@CONTROPARTE', '@CONTROPARTE — fornitore/cliente per nome', sel)}${opt('@MOVIMENTO', '@MOVIMENTO — conto assegnato al movimento', sel)}</optgroup><optgroup label="Piano dei conti">${generaleOptionsHTML(sel)}</optgroup>`;
-  const rigaHtml = t => `<div class="rs-riga" style="display:grid; grid-template-columns:3fr 90px 1.4fr 30px; gap:6px; margin-bottom:6px;">
+  const contoOpts = sel => `<optgroup label="Speciali">${opt('@RIGHE', '@RIGHE — conto di ogni riga fattura', sel)}${opt('@MOVIMENTO', '@MOVIMENTO — conto assegnato al movimento', sel)}</optgroup><optgroup label="Piano dei conti">${contoOptionsHTML(sel)}</optgroup>`;
+  const rigaHtml = t => `<div class="rs-riga" style="display:grid; grid-template-columns:3fr 80px 1.3fr 90px 30px; gap:6px; align-items:center; margin-bottom:6px;">
     <select class="rs-conto" style="width:100%;">${contoOpts(t.conto)}</select>
     <select class="rs-lato">${opt('dare', 'Dare', t.lato)}${opt('avere', 'Avere', t.lato)}</select>
     <select class="rs-importo">${Object.entries(IMPORTI_SCRITTURE).map(([k, v]) => opt(k, v, t.importo)).join('')}</select>
+    <label style="font-size:11px;" title="Registra anche il nome del fornitore/cliente sulla riga (partitario)"><input type="checkbox" class="rs-part" ${t.partitario ? 'checked' : ''}> partitario</label>
     <button type="button" class="btn secondary rs-del" style="padding:0;">×</button></div>`;
   box.onclick = null; box.onchange = null;
   box.innerHTML = `<h2>${regola ? 'Modifica regola scrittura' : 'Nuova regola scrittura'}</h2>
@@ -14334,14 +14317,14 @@ function apriModaleRegolaScrittura(regola) {
   const err = m => { status.className = 'status err'; status.textContent = m; };
   document.getElementById('rsSalva').onclick = async () => {
     const v = id => document.getElementById(id).value.trim();
-    const righe = [...righeEl.querySelectorAll('.rs-riga')].map(x => ({ conto: x.querySelector('.rs-conto').value, lato: x.querySelector('.rs-lato').value, importo: x.querySelector('.rs-importo').value }));
+    const righe = [...righeEl.querySelectorAll('.rs-riga')].map(x => ({ conto: x.querySelector('.rs-conto').value, lato: x.querySelector('.rs-lato').value, importo: x.querySelector('.rs-importo').value, ...(x.querySelector('.rs-part').checked ? { partitario: true } : {}) }));
     const dati = { nome: v('rsNome'), azienda: v('rsAzienda') || null, origine: v('rsOrigine'), verso: v('rsVerso') || null, banca: v('rsBanca') || null,
       numero_conto: v('rsNumConto') || null, controparte_contiene: v('rsControparte') || null, tipo_documento: v('rsTipoDoc') || null,
       descrizione_contiene: v('rsDescInc') || null, descrizione_esclude: v('rsDescEsc') || null, righe, priorita: Number(v('rsPriorita')) || 100,
       attiva: v('rsAttiva') === '1', automatica: v('rsAutomatica') === '1', note: v('rsNote') || null };
     if (!dati.nome) return err('Dai un nome alla regola.');
     if (righe.length < 2) return err('Servono almeno due righe (un dare e un avere).');
-    if (righe.some(x => !x.conto)) return err('Scegli il conto in ogni riga.');
+    if (righe.some(x => !x.conto || x.conto === 'null')) return err('Scegli il conto in ogni riga.');
     if (!righe.some(x => x.lato === 'dare') || !righe.some(x => x.lato === 'avere')) return err('Serve almeno una riga in dare e una in avere.');
     const q = regola ? supabase.from('regole_scritture').update(dati).eq('id', regola.id) : supabase.from('regole_scritture').insert(dati);
     const { error } = await q;
