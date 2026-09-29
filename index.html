@@ -162,7 +162,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 236</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 237</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -888,6 +888,7 @@
         <label>Dal: <input type="date" id="pnDal"></label>
         <label>Al: <input type="date" id="pnAl"></label>
         <button class="btn" id="btnPnGenera">Genera scritture (anteprima)</button>
+        <button class="btn" id="btnPnElaboraTutto" title="Per tutte e quattro le origini: registra le scritture delle regole Automatiche che quadrano e mostra cosa resta da controllare">Elabora tutto</button>
         <button class="btn secondary" id="btnPnAutomatiche" title="Registra subito, senza anteprima, solo le scritture di regole marcate Automatica e che quadrano">Registra automatiche</button>
       </div>
       <div class="toolbar" style="flex-wrap:wrap;">
@@ -897,6 +898,7 @@
         <span class="muted" id="pnCount"></span>
       </div>
       <div class="status" id="pnStatus"></div>
+      <div id="pnRiepilogo"></div>
       <div class="table-wrap"><div id="pnTable"></div></div>
     </div>
   </section>
@@ -14130,7 +14132,7 @@ async function proponiScritture(origine, dal, al) {
     const s = costruisciScrittura(regola, origine, d);
     proposte.push({ tab, docId: doc.id, azienda: doc.azienda, data: d.data, descrizione: d.descrizione, regola, ...s });
   }
-  return { proposte, senzaRegola, totaleDocs };
+  return { proposte, senzaRegola, totaleDocs, daElaborare: docs.length };
 }
 
 async function salvaProposte(proposte) {
@@ -14370,6 +14372,49 @@ function apriModaleRegolaScrittura(regola) {
 }
 
 document.getElementById('btnPnGenera').addEventListener('click', () => generaScrittureDaUi(false));
+// Ciclo periodico: dopo aver caricato estratti conto e quietanze, un solo bottone elabora tutte le origini
+async function elaboraTuttoPrimaNota() {
+  const st = document.getElementById('pnStatus');
+  const box = document.getElementById('pnRiepilogo');
+  const dal = document.getElementById('pnDal').value || null, al = document.getElementById('pnAl').value || null;
+  box.innerHTML = '';
+  const righe = [];
+  try {
+    if (!pianoConti.length) await loadPianoConti();
+    let registrate = 0;
+    const errori = [];
+    for (const origine of Object.keys(ORIGINI_SCRITTURE)) {
+      st.className = 'status'; st.textContent = `Elaboro: ${ORIGINI_SCRITTURE[origine].label}...`;
+      const esito = await proponiScritture(origine, dal, al);
+      const auto = esito.proposte.filter(p => p.quadra && p.regola.automatica);
+      if (auto.length) {
+        const r = await salvaProposte(auto);
+        registrate += r.ok;
+        errori.push(...r.errori);
+      }
+      const dopo = esito.proposte.filter(p => !auto.includes(p));
+      const motivi = new Map();
+      dopo.filter(p => !p.quadra).forEach(p => p.problemi.forEach(m => {
+        const k = m.replace(/:.*$/, '').replace(/ dare .*$/, '');
+        motivi.set(k, (motivi.get(k) || 0) + 1);
+      }));
+      righe.push({ origine, daElaborare: esito.daElaborare, registrate: auto.length, daConfermare: dopo.filter(p => p.quadra).length,
+        bloccate: dopo.filter(p => !p.quadra).length, motivi: [...motivi].map(([k, n]) => `${k} (${n})`).join(', '), senzaRegola: esito.senzaRegola });
+    }
+    st.className = errori.length ? 'status err' : 'status ok';
+    st.textContent = `Registrate ${registrate} scritture automatiche.` + (errori.length ? ` Errori: ${errori.slice(0, 3).join(' | ')}` : '');
+    box.innerHTML = `<table class="data" style="margin:8px 0 14px;"><thead><tr><th>Origine</th><th class="num">Da elaborare</th><th class="num">Registrate ora</th><th class="num">Da confermare (anteprima)</th><th class="num">Bloccate</th><th class="num">Senza regola</th><th>Motivi dei blocchi</th><th></th></tr></thead><tbody>
+      ${righe.map(r => `<tr><td>${escR(ORIGINI_SCRITTURE[r.origine].label)}</td><td class="num">${r.daElaborare}</td><td class="num">${r.registrate}</td><td class="num">${r.daConfermare}</td>
+        <td class="num"${r.bloccate ? ' style="color:var(--red); font-weight:600;"' : ''}>${r.bloccate}</td><td class="num">${r.senzaRegola}</td><td style="white-space:normal; max-width:340px;">${escR(r.motivi || '—')}</td>
+        <td>${r.daConfermare + r.bloccate ? `<button type="button" class="btn secondary" style="padding:2px 8px; font-size:11px;" data-pn-apri="${r.origine}">Apri anteprima</button>` : ''}</td></tr>`).join('')}</tbody></table>`;
+    box.querySelectorAll('[data-pn-apri]').forEach(b => b.addEventListener('click', () => {
+      document.getElementById('pnOrigine').value = b.dataset.pnApri;
+      generaScrittureDaUi(false);
+    }));
+    loadPrimaNota();
+  } catch (e) { st.className = 'status err'; st.textContent = 'Errore: ' + (e.message || e); }
+}
+document.getElementById('btnPnElaboraTutto').addEventListener('click', elaboraTuttoPrimaNota);
 document.getElementById('btnPnAutomatiche').addEventListener('click', () => generaScrittureDaUi(true));
 document.getElementById('btnPnAggiorna').addEventListener('click', loadPrimaNota);
 document.getElementById('pnFiltroStato').addEventListener('change', loadPrimaNota);
