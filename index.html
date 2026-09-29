@@ -13995,7 +13995,7 @@ async function loadRegoleScritture(forza = false) {
 }
 
 // dati normalizzati di un documento/movimento per il confronto con le regole e il calcolo degli importi
-function datiScrittura(origine, doc, righe) {
+function datiScrittura(origine, doc, righe, coll = null) {
   if (origine === 'fattura_acquisto' || origine === 'fattura_vendita') {
     const acq = origine === 'fattura_acquisto';
     const totale = r2(doc.importo_totale);
@@ -14004,13 +14004,13 @@ function datiScrittura(origine, doc, righe) {
     return { data: doc.data, azienda: doc.azienda, controparte: acq ? doc.fornitore_denominazione : doc.cliente_denominazione,
       descrizione: `${acq ? 'Fatt. acq.' : 'Fatt. vend.'} ${doc.numero || ''} ${(acq ? doc.fornitore_denominazione : doc.cliente_denominazione) || ''}`.trim(),
       totale, imponibile, iva, importo: totale, nota_credito: /^TD0?(4|8)$/.test(doc.tipo_documento || ''), tipoDoc: doc.tipo_documento || '',
-      righe, verso: null, banca: '', numeroConto: '', contoMovimento: null };
+      righe, verso: null, banca: '', numeroConto: '', contoMovimento: null, collegamento: '' };
   }
   const carta = origine === 'movimento_carta';
   const dare = carta ? Math.max(0, Number(doc.importo) || 0) : Number(doc.dare) || 0;
   const avere = carta ? Math.max(0, -(Number(doc.importo) || 0)) : Number(doc.avere) || 0;
   const imp = r2(dare > 0 ? dare : avere);
-  return { data: doc.data_operazione, azienda: doc.azienda, controparte: doc.descrizione, descrizione: (doc.descrizione || '').slice(0, 120),
+  return { data: doc.data_operazione, azienda: doc.azienda, controparte: (coll && coll.nome) || doc.descrizione, collegamento: coll ? coll.tipo : 'nessuno', descrizione: (doc.descrizione || '').slice(0, 120),
     totale: imp, imponibile: imp, iva: 0, importo: imp, nota_credito: false, tipoDoc: '', righe: [],
     verso: dare > 0 ? 'dare' : 'avere', banca: String((carta ? doc.carta : doc.banca) || '').toUpperCase(),
     numeroConto: String(doc.numero_conto || '').replace(/\s+/g, '').toUpperCase(),
@@ -14023,6 +14023,7 @@ function regolaScritturaCorrisponde(r, origine, d) {
   const alt = s => String(s).split('|').map(x => x.trim().toUpperCase()).filter(Boolean);
   const contiene = (testo, lista) => { const t = String(testo || '').toUpperCase(); return alt(lista).some(x => t.includes(x)); };
   if (r.verso && r.verso !== d.verso) return false;
+  if (r.collegamento && d.collegamento && r.collegamento !== d.collegamento) return false;
   if (r.banca && !contiene(d.banca, r.banca)) return false;
   if (r.numero_conto && !alt(r.numero_conto).some(x => d.numeroConto.endsWith(x.replace(/\s+/g, '')))) return false;
   if (r.controparte_contiene && !contiene(d.controparte, r.controparte_contiene)) return false;
@@ -14088,17 +14089,38 @@ async function caricaDocumentiPerScritture(origine, dal, al) {
       (data || []).forEach(r => { if (!righePerDoc.has(r.fattura_id)) righePerDoc.set(r.fattura_id, []); righePerDoc.get(r.fattura_id).push(r); });
     }
   }
-  return { tab, docs: nuovi, righePerDoc, totaleDocs: (docs || []).length };
+  // movimenti: fattura collegata (pagamenti_fatture) e nome del fornitore/cliente, per le regole "collegato a fattura"
+  const collegamenti = new Map();
+  if (!acq && !vend && nuovi.length) {
+    const { data: pf, error: e4 } = await fetchTutteLeRighe(() => supabase.from('pagamenti_fatture').select('movimento_id,fattura_id,fattura_tipo').eq('movimento_tabella', tab).order('id'));
+    if (e4) throw e4;
+    const perMov = new Map();
+    (pf || []).forEach(x => { if (!perMov.has(x.movimento_id)) perMov.set(x.movimento_id, x); });
+    nuovi.forEach(m => { if (!perMov.has(m.id) && m.fattura_id) perMov.set(m.id, { movimento_id: m.id, fattura_id: m.fattura_id, fattura_tipo: m.fattura_tipo }); });
+    const idsPer = { acquisto: [], vendita: [] };
+    perMov.forEach(x => { if (x.fattura_tipo === 'vendita') idsPer.vendita.push(x.fattura_id); else if (x.fattura_tipo) idsPer.acquisto.push(x.fattura_id); });
+    const nomi = new Map();
+    for (const [tipo, lista] of Object.entries(idsPer)) {
+      const tabF = tipo === 'vendita' ? 'fatture_vendita' : 'fatture';
+      const campo = tipo === 'vendita' ? 'cliente_denominazione' : 'fornitore_denominazione';
+      for (let i = 0; i < lista.length; i += 150) {
+        const { data } = await fetchTutteLeRighe(() => supabase.from(tabF).select('id,' + campo).in('id', lista.slice(i, i + 150)).order('id'));
+        (data || []).forEach(f => nomi.set(f.id, f[campo]));
+      }
+    }
+    perMov.forEach((x, id) => collegamenti.set(id, { tipo: x.fattura_tipo === 'vendita' ? 'vendita' : 'acquisto', nome: nomi.get(x.fattura_id) || null }));
+  }
+  return { tab, docs: nuovi, righePerDoc, collegamenti, totaleDocs: (docs || []).length };
 }
 
 async function proponiScritture(origine, dal, al) {
   const regole = await loadRegoleScritture(true);
   if (!pianoConti.length) await loadPianoConti();
-  const { tab, docs, righePerDoc, totaleDocs } = await caricaDocumentiPerScritture(origine, dal, al);
+  const { tab, docs, righePerDoc, collegamenti, totaleDocs } = await caricaDocumentiPerScritture(origine, dal, al);
   const proposte = [];
   let senzaRegola = 0;
   for (const doc of docs) {
-    const d = datiScrittura(origine, doc, righePerDoc.get(doc.id) || []);
+    const d = datiScrittura(origine, doc, righePerDoc.get(doc.id) || [], collegamenti.get(doc.id) || null);
     const regola = regole.find(r => regolaScritturaCorrisponde(r, origine, d));
     if (!regola) { senzaRegola++; continue; }
     const s = costruisciScrittura(regola, origine, d);
@@ -14246,7 +14268,7 @@ async function loadRegoleScrittureTab() {
     el.innerHTML = `<table class="data"><thead><tr><th>Attiva</th><th class="num">Priorità</th><th>Nome</th><th>Origine</th><th>Condizioni</th><th>Scrittura</th><th>Auto</th><th class="num">Usata</th><th></th></tr></thead><tbody>
       ${regole.map(r => {
         const cond = [r.banca && 'banca: ' + r.banca, r.verso && 'verso: ' + r.verso, r.controparte_contiene && 'controparte: ' + r.controparte_contiene,
-          r.descrizione_contiene && 'descr.: ' + r.descrizione_contiene, r.descrizione_esclude && 'tranne: ' + r.descrizione_esclude, r.tipo_documento && 'tipo: ' + r.tipo_documento].filter(Boolean);
+          r.descrizione_contiene && 'descr.: ' + r.descrizione_contiene, r.descrizione_esclude && 'tranne: ' + r.descrizione_esclude, r.tipo_documento && 'tipo: ' + r.tipo_documento, r.collegamento && 'fattura: ' + r.collegamento].filter(Boolean);
         return `<tr${r.attiva ? '' : ' style="opacity:.5;"'}><td><input type="checkbox" data-rs-attiva="${r.id}" ${r.attiva ? 'checked' : ''}></td><td class="num">${r.priorita}</td>
         <td style="white-space:normal;">${escR(r.nome)}${r.note ? `<div class="muted" style="font-size:10.5px;">${escR(r.note)}</div>` : ''}</td>
         <td>${escR(ORIGINI_SCRITTURE[r.origine]?.label || r.origine)}</td><td style="white-space:normal; max-width:240px;">${escR(cond.join(' · ') || 'tutti')}</td>
@@ -14290,6 +14312,7 @@ function apriModaleRegolaScrittura(regola) {
       ${campo('Numero conto finisce con', inp('rsNumConto', r.numero_conto, 'es. 2488'))}
       ${campo('Fornitore / cliente contiene', inp('rsControparte', r.controparte_contiene, 'es. ENEL | EDISON'))}
       ${campo('Tipo documento', inp('rsTipoDoc', r.tipo_documento, 'es. TD01 | TD04'))}
+      ${campo('Movimento collegato a fattura', `<select id="rsColl" style="width:100%;">${opt('', 'indifferente', r.collegamento)}${opt('acquisto', 'di acquisto (pagamento fornitore)', r.collegamento)}${opt('vendita', 'di vendita (incasso cliente)', r.collegamento)}${opt('nessuno', 'nessuna fattura', r.collegamento)}</select>`)}
       ${campo('La descrizione contiene', inp('rsDescInc', r.descrizione_contiene))}
       ${campo('La descrizione NON contiene', inp('rsDescEsc', r.descrizione_esclude))}
     </div>
@@ -14319,7 +14342,7 @@ function apriModaleRegolaScrittura(regola) {
     const v = id => document.getElementById(id).value.trim();
     const righe = [...righeEl.querySelectorAll('.rs-riga')].map(x => ({ conto: x.querySelector('.rs-conto').value, lato: x.querySelector('.rs-lato').value, importo: x.querySelector('.rs-importo').value, ...(x.querySelector('.rs-part').checked ? { partitario: true } : {}) }));
     const dati = { nome: v('rsNome'), azienda: v('rsAzienda') || null, origine: v('rsOrigine'), verso: v('rsVerso') || null, banca: v('rsBanca') || null,
-      numero_conto: v('rsNumConto') || null, controparte_contiene: v('rsControparte') || null, tipo_documento: v('rsTipoDoc') || null,
+      numero_conto: v('rsNumConto') || null, controparte_contiene: v('rsControparte') || null, tipo_documento: v('rsTipoDoc') || null, collegamento: v('rsColl') || null,
       descrizione_contiene: v('rsDescInc') || null, descrizione_esclude: v('rsDescEsc') || null, righe, priorita: Number(v('rsPriorita')) || 100,
       attiva: v('rsAttiva') === '1', automatica: v('rsAutomatica') === '1', note: v('rsNote') || null };
     if (!dati.nome) return err('Dai un nome alla regola.');

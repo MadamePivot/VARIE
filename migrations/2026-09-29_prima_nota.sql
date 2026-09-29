@@ -69,3 +69,5 @@ create policy prima_nota_righe_all on prima_nota_righe for all using (true) with
 -- partitario fornitori/clienti: nome della controparte sulla riga di scrittura
 alter table prima_nota_righe add column if not exists controparte text;
 create index if not exists prima_nota_righe_controparte on prima_nota_righe(controparte);
+
+alter table regole_scritture add column if not exists collegamento text check (collegamento in ('acquisto','vendita','nessuno'));
