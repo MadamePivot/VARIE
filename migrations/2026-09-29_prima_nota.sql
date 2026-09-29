@@ -71,3 +71,6 @@ alter table prima_nota_righe add column if not exists controparte text;
 create index if not exists prima_nota_righe_controparte on prima_nota_righe(controparte);
 
 alter table regole_scritture add column if not exists collegamento text check (collegamento in ('acquisto','vendita','nessuno'));
+
+-- gruppi di regole (si confermano insieme)
+alter table regole_scritture add column if not exists gruppo text;

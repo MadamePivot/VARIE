@@ -162,7 +162,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 237</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 238</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14272,7 +14272,16 @@ async function loadRegoleScrittureTab() {
     if (!pianoConti.length) await loadPianoConti();
     const regole = await loadRegoleScritture(true);
     document.getElementById('regoleScrCount').textContent = `${regole.length} regole (${regole.filter(r => r.attiva).length} attive)`;
-    el.innerHTML = `<table class="data"><thead><tr><th>Attiva</th><th class="num">Priorità</th><th>Nome</th><th>Origine</th><th>Condizioni</th><th>Scrittura</th><th>Auto</th><th class="num">Usata</th><th></th></tr></thead><tbody>
+    const gruppi = new Map();
+    regole.forEach(r => { const g = r.gruppo || '(senza gruppo)'; if (!gruppi.has(g)) gruppi.set(g, []); gruppi.get(g).push(r); });
+    const riepGruppi = `<div class="upload-block" style="padding:10px; margin-bottom:10px;"><strong style="font-size:12px;">Gruppi di regole</strong>
+      <p class="muted" style="margin:4px 0 8px;">Le regole dello stesso gruppo hanno la stessa struttura (una per conto o banca). Dopo aver controllato le prime scritture in anteprima, "Conferma gruppo" le rende tutte automatiche in un colpo solo: verranno registrate da "Elabora tutto" senza anteprima.</p>
+      <table class="data"><thead><tr><th>Gruppo</th><th class="num">Regole</th><th class="num">Automatiche</th><th class="num">Applicate</th><th></th></tr></thead><tbody>
+      ${[...gruppi].map(([g, rs]) => { const nAuto = rs.filter(r => r.automatica).length; return `<tr><td>${escR(g)}</td><td class="num">${rs.length}</td><td class="num">${nAuto}</td><td class="num">${rs.reduce((t, r) => t + (r.volte_applicata || 0), 0)}</td>
+        <td>${nAuto < rs.length ? `<button type="button" class="btn" style="padding:2px 8px; font-size:11px;" data-rs-gruppo-auto="${escR(g)}">Conferma gruppo (automatiche)</button>` : ''}
+        ${nAuto ? `<button type="button" class="btn secondary" style="padding:2px 8px; font-size:11px;" data-rs-gruppo-anteprima="${escR(g)}">Torna ad anteprima</button>` : ''}</td></tr>`; }).join('')}
+      </tbody></table></div>`;
+    el.innerHTML = riepGruppi + `<table class="data"><thead><tr><th>Attiva</th><th class="num">Priorità</th><th>Nome</th><th>Origine</th><th>Condizioni</th><th>Scrittura</th><th>Auto</th><th class="num">Usata</th><th></th></tr></thead><tbody>
       ${regole.map(r => {
         const cond = [r.banca && 'banca: ' + r.banca, r.verso && 'verso: ' + r.verso, r.controparte_contiene && 'controparte: ' + r.controparte_contiene,
           r.descrizione_contiene && 'descr.: ' + r.descrizione_contiene, r.descrizione_esclude && 'tranne: ' + r.descrizione_esclude, r.tipo_documento && 'tipo: ' + r.tipo_documento, r.collegamento && 'fattura: ' + r.collegamento].filter(Boolean);
@@ -14283,6 +14292,17 @@ async function loadRegoleScrittureTab() {
         <td>${r.automatica ? '<span class="pill" style="background:#d9ead0;">auto</span>' : ''}</td><td class="num">${r.volte_applicata || 0}</td>
         <td><button type="button" class="btn secondary" style="padding:2px 8px; font-size:11px;" data-rs-modifica="${r.id}">Modifica</button></td></tr>`;
       }).join('')}</tbody></table>`;
+    const cambiaGruppo = (g, automatica) => async () => {
+      const q = supabase.from('regole_scritture').update({ automatica });
+      const { error } = await (g === '(senza gruppo)' ? q.is('gruppo', null) : q.eq('gruppo', g));
+      if (error) alert('Errore: ' + error.message);
+      loadRegoleScrittureTab();
+    };
+    el.querySelectorAll('[data-rs-gruppo-auto]').forEach(b => b.addEventListener('click', () => {
+      const g = b.dataset.rsGruppoAuto;
+      if (confirm(`Rendere automatiche tutte le regole del gruppo "${g}"? Da ora "Elabora tutto" le registra senza anteprima (solo se la scrittura quadra).`)) cambiaGruppo(g, true)();
+    }));
+    el.querySelectorAll('[data-rs-gruppo-anteprima]').forEach(b => b.addEventListener('click', cambiaGruppo(b.dataset.rsGruppoAnteprima, false)));
     el.querySelectorAll('[data-rs-attiva]').forEach(chk => chk.addEventListener('change', async () => {
       const { error } = await supabase.from('regole_scritture').update({ attiva: chk.checked }).eq('id', chk.dataset.rsAttiva);
       if (error) alert('Errore: ' + error.message);
@@ -14292,8 +14312,12 @@ async function loadRegoleScrittureTab() {
   } catch (e) { el.textContent = 'Errore: ' + (e.message || e); }
 }
 
-function apriModaleRegolaScrittura(regola) {
-  const r = regola || { nome: '', azienda: AZIENDA_SCRITTURA, origine: 'fattura_acquisto', banca: '', numero_conto: '', controparte_contiene: '', descrizione_contiene: '', descrizione_esclude: '', tipo_documento: '', verso: '', righe: [], priorita: 100, attiva: true, automatica: false, note: '' };
+function apriModaleRegolaScrittura(regola, comeNuova = false) {
+  if (comeNuova) { const copia = regola; regola = null; return apriModaleRegolaScrittura_(copia, null); }
+  return apriModaleRegolaScrittura_(regola, regola);
+}
+function apriModaleRegolaScrittura_(dati0, regola) {
+  const r = dati0 || { nome: '', azienda: AZIENDA_SCRITTURA, origine: 'fattura_acquisto', banca: '', numero_conto: '', controparte_contiene: '', descrizione_contiene: '', descrizione_esclude: '', tipo_documento: '', verso: '', righe: [], priorita: 100, attiva: true, automatica: false, note: '' };
   const overlay = document.getElementById('modalAutomatismiOverlay');
   const box = document.getElementById('modalAutomatismiContent');
   const opt = (val, lbl, sel) => `<option value="${escR(val)}" ${String(sel || '') === String(val) ? 'selected' : ''}>${escR(lbl)}</option>`;
@@ -14331,9 +14355,10 @@ function apriModaleRegolaScrittura(regola) {
       ${campo('Stato', `<select id="rsAttiva" style="width:100%;">${opt('1', 'Attiva', r.attiva ? '1' : '0')}${opt('0', 'Disattivata', r.attiva ? '1' : '0')}</select>`)}
       ${campo('Applicazione', `<select id="rsAutomatica" style="width:100%;">${opt('0', 'Con anteprima', r.automatica ? '1' : '0')}${opt('1', 'Automatica (Registra automatiche)', r.automatica ? '1' : '0')}</select>`)}
     </div>
+ ${campo('Gruppo', inp('rsGruppo', r.gruppo, 'es. Pagamenti a fornitori'), 'Regole dello stesso gruppo si confermano insieme.')}
     ${campo('Note', inp('rsNote', r.note))}
     <div class="toolbar" style="justify-content:flex-end;">
-      ${regola ? '<button type="button" class="btn secondary" id="rsElimina" style="color:var(--red);">Elimina</button>' : ''}
+      ${regola ? '<button type="button" class="btn secondary" id="rsDuplica">Duplica (es. per un altro conto)</button><button type="button" class="btn secondary" id="rsElimina" style="color:var(--red);">Elimina</button>' : ''}
       <button type="button" class="btn secondary" id="rsAnnulla">Annulla</button><button type="button" class="btn" id="rsSalva">Salva</button></div>
     <div class="status" id="rsStatus"></div>`;
   const chiudi = () => { overlay.style.display = 'none'; box.innerHTML = ''; };
@@ -14351,7 +14376,7 @@ function apriModaleRegolaScrittura(regola) {
     const dati = { nome: v('rsNome'), azienda: v('rsAzienda') || null, origine: v('rsOrigine'), verso: v('rsVerso') || null, banca: v('rsBanca') || null,
       numero_conto: v('rsNumConto') || null, controparte_contiene: v('rsControparte') || null, tipo_documento: v('rsTipoDoc') || null, collegamento: v('rsColl') || null,
       descrizione_contiene: v('rsDescInc') || null, descrizione_esclude: v('rsDescEsc') || null, righe, priorita: Number(v('rsPriorita')) || 100,
-      attiva: v('rsAttiva') === '1', automatica: v('rsAutomatica') === '1', note: v('rsNote') || null };
+      attiva: v('rsAttiva') === '1', automatica: v('rsAutomatica') === '1', gruppo: v('rsGruppo') || null, note: v('rsNote') || null };
     if (!dati.nome) return err('Dai un nome alla regola.');
     if (righe.length < 2) return err('Servono almeno due righe (un dare e un avere).');
     if (righe.some(x => !x.conto || x.conto === 'null')) return err('Scegli il conto in ogni riga.');
@@ -14361,6 +14386,8 @@ function apriModaleRegolaScrittura(regola) {
     if (error) return err('Errore: ' + error.message);
     chiudi(); loadRegoleScrittureTab();
   };
+  const dup = document.getElementById('rsDuplica');
+  if (dup) dup.onclick = () => { const { id, created_at, volte_applicata, ...resto } = regola; apriModaleRegolaScrittura({ ...resto, nome: regola.nome + ' (copia)', automatica: false }, true); };
   const elim = document.getElementById('rsElimina');
   if (elim) elim.onclick = async () => {
     if (!confirm('Eliminare la regola? Le scritture già registrate restano.')) return;
