@@ -162,7 +162,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 242</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 243</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14039,6 +14039,14 @@ function regolaScritturaCorrisponde(r, origine, d) {
   return true;
 }
 
+// mastro di un conto NN.NNNN = NN.0000, se esiste nel piano; altrimenti il conto stesso
+function mastroDi(codice) {
+  const m = /^(\d\d)\.\d{4}$/.exec(codice || '');
+  if (!m) return codice;
+  const mastro = m[1] + '.0000';
+  return pianoConti.some(c => c.codice === mastro) ? mastro : codice;
+}
+
 // Restituisce { righe:[{conto,descrizione,dare,avere}], problemi:[...], quadra } per la regola scelta
 function costruisciScrittura(regola, origine, d) {
   const problemi = [];
@@ -14053,9 +14061,23 @@ function costruisciScrittura(regola, origine, d) {
       out.push({ conto: conto || '', descrizione: descr, controparte, fix: conto ? null : fix, dare: lato === 'dare' ? importo : 0, avere: lato === 'avere' ? importo : 0 });
     };
     if (t.conto === '@RIGHE') {
+      // di default le righe si raggruppano per mastro (es. 10.0004 e 10.0007 -> 10.0000); il dettaglio resta
+      // sulle righe fattura e si legge nella descrizione della riga di scrittura. livello:'dettaglio' = un conto per conto.
+      const perMastro = t.livello !== 'dettaglio';
       const gruppi = new Map();
-      d.righe.forEach(rg => gruppi.set(rg.codice_conto || '', r2((gruppi.get(rg.codice_conto || '') || 0) + (Number(rg.prezzo_totale) || 0))));
-      gruppi.forEach((imp, conto) => aggiungi(conto, imp, conto ? 'righe fattura' : 'righe fattura senza conto', null, 'righe'));
+      d.righe.forEach(rg => {
+        const c = rg.codice_conto || '';
+        const m = c && perMastro ? mastroDi(c) : c;
+        const g = gruppi.get(m) || { imp: 0, dettaglio: new Map() };
+        const imp = Number(rg.prezzo_totale) || 0;
+        g.imp += imp; g.dettaglio.set(c, r2((g.dettaglio.get(c) || 0) + imp));
+        gruppi.set(m, g);
+      });
+      gruppi.forEach((g, conto) => {
+        const dett = perMastro && conto && [...g.dettaglio.keys()].some(k => k !== conto)
+          ? ': ' + [...g.dettaglio].map(([c, i]) => `${c} ${fmtEUR(i)}`).join(', ') : '';
+        aggiungi(conto, g.imp, conto ? 'righe fattura' + dett : 'righe fattura senza conto', null, 'righe');
+      });
       continue;
     }
     let conto = t.conto;
@@ -14224,7 +14246,9 @@ function apriAnteprimaScritture(esito, origine) {
   const { proposte, senzaRegola, totaleDocs } = esito;
   box.onclick = null; box.onchange = null;
   const scelte = new Set(proposte.map((p, i) => p.quadra ? i : -1).filter(i => i >= 0));
-  let opzioniConto = null;
+  // menu con poche voci: i mastri; in fondo "tutti i conti" per il dettaglio
+  const opzioniMastri = () => '<option value="">(da assegnare)</option>' + pianoConti.filter(c => /^\d\d\.0000$/.test(c.codice) && !c._altraAzienda && !/^8[2-6]\./.test(c.codice))
+    .sort((x, y) => x.codice.localeCompare(y.codice)).map(c => `<option value="${c.codice}">${escR(c.descrizione || '')} (${c.codice})</option>`).join('') + '<option value="__tutti__">— mostra tutti i conti di dettaglio —</option>';
   const PAG = 60;
   let pagina = 0, filtro = proposte.some(p => !p.quadra) ? 'problemi' : 'tutte';
   const visibili = () => proposte.map((p, i) => i).filter(i => filtro === 'tutte' || (filtro === 'problemi' ? !proposte[i].quadra : proposte[i].quadra));
@@ -14260,11 +14284,11 @@ function apriAnteprimaScritture(esito, origine) {
     box.querySelectorAll('[data-ante]').forEach(c => c.addEventListener('change', () => { c.checked ? scelte.add(Number(c.dataset.ante)) : scelte.delete(Number(c.dataset.ante)); agg(); }));
     box.querySelectorAll('[data-fix]').forEach(sl => sl.addEventListener('mousedown', () => {
       if (sl.dataset.pieno) return;
-      if (opzioniConto === null) opzioniConto = contoOptionsHTML('');
-      sl.innerHTML = opzioniConto; sl.dataset.pieno = '1';
+      sl.innerHTML = opzioniMastri(); sl.dataset.pieno = '1';
     }));
     box.querySelectorAll('[data-fix]').forEach(sl => sl.addEventListener('change', async () => {
       if (!sl.value) return;
+      if (sl.value === '__tutti__') { sl.innerHTML = contoOptionsHTML(''); try { sl.showPicker(); } catch (e) { /* si apre col clic */ } return; }
       const i = Number(sl.dataset.fix);
       sl.disabled = true;
       try {
