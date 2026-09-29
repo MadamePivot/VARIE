@@ -162,7 +162,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 238</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 239</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14046,21 +14046,21 @@ function costruisciScrittura(regola, origine, d) {
   const inverti = d.nota_credito;
   for (const t of (regola.righe || [])) {
     const lato = inverti ? (t.lato === 'dare' ? 'avere' : 'dare') : t.lato;
-    const aggiungi = (conto, importo, descr, controparte = null) => {
+    const aggiungi = (conto, importo, descr, controparte = null, fix = null) => {
       importo = r2(importo);
       if (!importo) return;
       if (!conto) problemi.push('conto mancante: ' + descr);
-      out.push({ conto: conto || '', descrizione: descr, controparte, dare: lato === 'dare' ? importo : 0, avere: lato === 'avere' ? importo : 0 });
+      out.push({ conto: conto || '', descrizione: descr, controparte, fix: conto ? null : fix, dare: lato === 'dare' ? importo : 0, avere: lato === 'avere' ? importo : 0 });
     };
     if (t.conto === '@RIGHE') {
       const gruppi = new Map();
       d.righe.forEach(rg => gruppi.set(rg.codice_conto || '', r2((gruppi.get(rg.codice_conto || '') || 0) + (Number(rg.prezzo_totale) || 0))));
-      gruppi.forEach((imp, conto) => aggiungi(conto, imp, conto ? 'righe fattura' : 'righe fattura senza conto'));
+      gruppi.forEach((imp, conto) => aggiungi(conto, imp, conto ? 'righe fattura' : 'righe fattura senza conto', null, 'righe'));
       continue;
     }
     let conto = t.conto;
     if (conto === '@MOVIMENTO') conto = d.contoMovimento;
-    aggiungi(conto, d[t.importo] || 0, t.descrizione || IMPORTI_SCRITTURE[t.importo] || '', t.partitario ? (d.controparte || '') : null);
+    aggiungi(conto, d[t.importo] || 0, t.descrizione || IMPORTI_SCRITTURE[t.importo] || '', t.partitario ? (d.controparte || '') : null, t.conto === '@MOVIMENTO' ? 'movimento' : null);
   }
   const dare = r2(out.reduce((s, r) => s + r.dare, 0)), avere = r2(out.reduce((s, r) => s + r.avere, 0));
   if (!out.length) problemi.push('nessuna riga generata');
@@ -14130,7 +14130,7 @@ async function proponiScritture(origine, dal, al) {
     const regola = regole.find(r => regolaScritturaCorrisponde(r, origine, d));
     if (!regola) { senzaRegola++; continue; }
     const s = costruisciScrittura(regola, origine, d);
-    proposte.push({ tab, docId: doc.id, azienda: doc.azienda, data: d.data, descrizione: d.descrizione, regola, ...s });
+    proposte.push({ tab, docId: doc.id, azienda: doc.azienda, data: d.data, descrizione: d.descrizione, regola, d, origine, ...s });
   }
   return { proposte, senzaRegola, totaleDocs, daElaborare: docs.length };
 }
@@ -14162,40 +14162,73 @@ function nomeContoGenerale(codice) {
   return c ? `${codice} ${c.descrizione || ''}` : codice;
 }
 
+// assegna il conto mancante direttamente dall'anteprima: righe fattura senza conto, o conto del movimento
+async function assegnaContoMancante(p, tipo, conto) {
+  if (tipo === 'righe') {
+    const tabR = p.origine === 'fattura_acquisto' ? 'righe_fattura' : 'righe_fattura_vendita';
+    const { error } = await supabase.from(tabR).update({ codice_conto: conto }).eq('fattura_id', p.docId).or('codice_conto.is.null,codice_conto.eq.');
+    if (error) throw error;
+    p.d.righe.forEach(r => { if (!r.codice_conto) r.codice_conto = conto; });
+  } else {
+    const { error } = await supabase.from(p.tab).update({ codice_conto: conto, riconciliato: true }).eq('id', p.docId);
+    if (error) throw error;
+    p.d.contoMovimento = conto;
+  }
+  Object.assign(p, costruisciScrittura(p.regola, p.origine, p.d));
+}
+
 function apriAnteprimaScritture(esito, origine) {
   const overlay = document.getElementById('modalAutomatismiOverlay');
   const box = document.getElementById('modalAutomatismiContent');
   const { proposte, senzaRegola, totaleDocs } = esito;
   box.onclick = null; box.onchange = null;
-  const validi = proposte.filter(p => p.quadra).length;
+  const scelte = new Set(proposte.map((p, i) => p.quadra ? i : -1).filter(i => i >= 0));
+  const opzioniConto = contoOptionsHTML('');
+  const corpo = () => proposte.map((p, i) => p.righe.map((r, j) => `<tr${p.quadra ? '' : ' style="background:#fdeaea;"'}>
+      <td>${j === 0 ? `<input type="checkbox" data-ante="${i}" ${p.quadra ? (scelte.has(i) ? 'checked' : '') : 'disabled'}>` : ''}</td>
+      <td>${j === 0 ? fmtDate(p.data) : ''}</td><td style="white-space:normal; min-width:220px;">${j === 0 ? escR(p.descrizione) + `<div class="muted" style="font-size:10.5px;">${escR(p.regola.nome)}</div>` : ''}${j === 0 && p.problemi.length ? `<div style="color:var(--red); font-size:11px;">${escR(p.problemi.join(' · '))}</div>` : ''}</td>
+      <td style="white-space:normal; min-width:200px;${r.conto ? '' : ' color:var(--red);'}">${r.conto ? escR(nomeContoGenerale(r.conto)) : (r.fix
+        ? `<select data-fix="${i}" data-fix-tipo="${r.fix}" style="max-width:260px;" title="${r.fix === 'righe' ? 'Assegna il conto a tutte le righe di questa fattura senza conto' : 'Assegna il conto a questo movimento'}">${opzioniConto}</select>`
+        : '— manca —')}${r.controparte ? `<div class="muted" style="font-size:10.5px;">${escR(r.controparte)}</div>` : ''}</td>
+      <td class="num" style="white-space:nowrap;">${r.dare ? fmtEUR(r.dare) : ''}</td><td class="num" style="white-space:nowrap;">${r.avere ? fmtEUR(r.avere) : ''}</td></tr>`).join('')).join('');
   box.innerHTML = `<h2>Anteprima scritture — ${escR(ORIGINI_SCRITTURE[origine].label)}</h2>
-    <p class="muted" style="margin-top:0;">${totaleDocs} documenti nel periodo, ${proposte.length} con una regola (${validi} pronte), ${senzaRegola} senza regola. Le scritture con problemi non si possono registrare: correggi la regola o il conto e rigenera.</p>
+    <p class="muted" style="margin-top:0;" id="anteInfo"></p>
     <div class="toolbar"><label><input type="checkbox" id="anteTutte" checked> Seleziona tutte le pronte</label>
       <button type="button" class="btn" id="anteRegistra">Registra selezionate</button><span class="muted" id="anteSel"></span></div>
     <div class="status" id="anteStatus"></div>
-    <div style="max-height:60vh; overflow:auto;"><table class="data" style="width:100%;"><thead><tr><th></th><th>Data</th><th>Descrizione / regola</th><th>Conto</th><th class="num">Dare</th><th class="num">Avere</th></tr></thead><tbody>
-    ${proposte.map((p, i) => p.righe.map((r, j) => `<tr${p.quadra ? '' : ' style="background:#fdeaea;"'}>
-      <td>${j === 0 ? `<input type="checkbox" data-ante="${i}" ${p.quadra ? 'checked' : 'disabled'}>` : ''}</td>
-      <td>${j === 0 ? fmtDate(p.data) : ''}</td><td style="white-space:normal; min-width:220px;">${j === 0 ? escR(p.descrizione) + `<div class="muted" style="font-size:10.5px;">${escR(p.regola.nome)}</div>` : ''}${j === 0 && p.problemi.length ? `<div style="color:var(--red); font-size:11px;">${escR(p.problemi.join(' · '))}</div>` : ''}</td>
-      <td style="white-space:normal; min-width:200px;${r.conto ? '' : ' color:var(--red);'}">${escR(r.conto ? nomeContoGenerale(r.conto) : '— manca —')}${r.controparte ? `<div class="muted" style="font-size:10.5px;">${escR(r.controparte)}</div>` : ''}</td>
-      <td class="num" style="white-space:nowrap;">${r.dare ? fmtEUR(r.dare) : ''}</td><td class="num" style="white-space:nowrap;">${r.avere ? fmtEUR(r.avere) : ''}</td></tr>`).join('')).join('')}
-    </tbody></table></div>`;
+    <div style="max-height:60vh; overflow:auto;"><table class="data" style="width:100%;"><thead><tr><th></th><th>Data</th><th>Descrizione / regola</th><th>Conto</th><th class="num">Dare</th><th class="num">Avere</th></tr></thead><tbody id="anteCorpo"></tbody></table></div>`;
   const cornice = box.parentElement;
   cornice.style.maxWidth = 'min(1200px, 96vw)';
   const chiudi = () => { overlay.style.display = 'none'; box.innerHTML = ''; cornice.style.maxWidth = '1000px'; };
   document.getElementById('modalAutomatismiClose').onclick = chiudi;
-  const sel = () => [...box.querySelectorAll('[data-ante]:checked')].map(c => proposte[Number(c.dataset.ante)]);
-  const agg = () => { document.getElementById('anteSel').textContent = `${sel().length} selezionate`; };
-  box.querySelectorAll('[data-ante]').forEach(c => c.addEventListener('change', agg));
-  document.getElementById('anteTutte').onchange = e => { box.querySelectorAll('[data-ante]:not(:disabled)').forEach(c => { c.checked = e.target.checked; }); agg(); };
-  agg();
+  const st = document.getElementById('anteStatus');
+  const agg = () => { document.getElementById('anteSel').textContent = `${scelte.size} selezionate`; };
+  const disegna = () => {
+    const validi = proposte.filter(p => p.quadra).length;
+    document.getElementById('anteInfo').textContent = `${totaleDocs} documenti nel periodo, ${proposte.length} con una regola (${validi} pronte), ${senzaRegola} senza regola. Le righe rosa hanno un problema: dove manca un conto scegli il conto dal menu e la scrittura si ricalcola.`;
+    document.getElementById('anteCorpo').innerHTML = corpo();
+    box.querySelectorAll('[data-ante]').forEach(c => c.addEventListener('change', () => { c.checked ? scelte.add(Number(c.dataset.ante)) : scelte.delete(Number(c.dataset.ante)); agg(); }));
+    box.querySelectorAll('[data-fix]').forEach(sl => sl.addEventListener('change', async () => {
+      if (!sl.value) return;
+      const i = Number(sl.dataset.fix);
+      sl.disabled = true;
+      try {
+        await assegnaContoMancante(proposte[i], sl.dataset.fixTipo, sl.value);
+        if (proposte[i].quadra) scelte.add(i);
+        st.className = 'status ok'; st.textContent = 'Conto assegnato.';
+      } catch (e) { st.className = 'status err'; st.textContent = 'Errore: ' + (e.message || e); }
+      disegna();
+    }));
+    agg();
+  };
+  document.getElementById('anteTutte').onchange = e => { proposte.forEach((p, i) => { if (p.quadra) { e.target.checked ? scelte.add(i) : scelte.delete(i); } }); disegna(); };
+  disegna();
   document.getElementById('anteRegistra').onclick = async () => {
-    const scelte = sel();
-    const st = document.getElementById('anteStatus');
-    if (!scelte.length) { st.className = 'status err'; st.textContent = 'Nessuna scrittura selezionata.'; return; }
+    const daSalvare = [...scelte].map(i => proposte[i]).filter(p => p.quadra);
+    if (!daSalvare.length) { st.className = 'status err'; st.textContent = 'Nessuna scrittura selezionata.'; return; }
     document.getElementById('anteRegistra').disabled = true;
-    st.className = 'status'; st.textContent = `Registro ${scelte.length} scritture...`;
-    const { ok, errori } = await salvaProposte(scelte);
+    st.className = 'status'; st.textContent = `Registro ${daSalvare.length} scritture...`;
+    const { ok, errori } = await salvaProposte(daSalvare);
     st.className = errori.length ? 'status err' : 'status ok';
     st.textContent = `Registrate ${ok} scritture.` + (errori.length ? ` Errori (${errori.length}): ${errori.slice(0, 3).join(' | ')}` : '');
     loadPrimaNota();
