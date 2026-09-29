@@ -162,7 +162,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 241</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 242</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14093,7 +14093,7 @@ async function caricaDocumentiPerScritture(origine, dal, al) {
     for (let i = 0; i < ids.length; i += 100) blocchi.push(ids.slice(i, i + 100));
     // richieste in parallelo, 4 alla volta
     for (let i = 0; i < blocchi.length; i += 4) {
-      const esiti = await Promise.all(blocchi.slice(i, i + 4).map(b => fetchTutteLeRighe(() => supabase.from(tabR).select('fattura_id,prezzo_totale,codice_conto').in('fattura_id', b).order('id'))));
+      const esiti = await Promise.all(blocchi.slice(i, i + 4).map(b => fetchTutteLeRighe(() => supabase.from(tabR).select('fattura_id,prezzo_totale,codice_conto,descrizione').in('fattura_id', b).order('id'))));
       for (const { data, error: e3 } of esiti) {
         if (e3) throw e3;
         (data || []).forEach(r => { if (!righePerDoc.has(r.fattura_id)) righePerDoc.set(r.fattura_id, []); righePerDoc.get(r.fattura_id).push(r); });
@@ -14183,18 +14183,39 @@ function nomeContoGenerale(codice) {
 }
 
 // assegna il conto mancante direttamente dall'anteprima: righe fattura senza conto, o conto del movimento
-async function assegnaContoMancante(p, tipo, conto) {
+async function assegnaContoMancante(p, tipo, conto, tutte = []) {
+  const mancante = v => v == null || v === '';
+  let altre = [];
   if (tipo === 'righe') {
     const tabR = p.origine === 'fattura_acquisto' ? 'righe_fattura' : 'righe_fattura_vendita';
     const { error } = await supabase.from(tabR).update({ codice_conto: conto }).eq('fattura_id', p.docId).or('codice_conto.is.null,codice_conto.eq.');
     if (error) throw error;
-    p.d.righe.forEach(r => { if (!r.codice_conto) r.codice_conto = conto; });
+    // stesse righe di altre fatture dello stesso fornitore/cliente (stessa descrizione) nell'anteprima
+    const descr = [...new Set(p.d.righe.filter(r => mancante(r.codice_conto) && r.descrizione).map(r => r.descrizione))];
+    p.d.righe.forEach(r => { if (mancante(r.codice_conto)) r.codice_conto = conto; });
+    altre = descr.length ? tutte.filter(q => q !== p && q.origine === p.origine && q.d.controparte === p.d.controparte
+      && q.d.righe.some(r => mancante(r.codice_conto) && descr.includes(r.descrizione))) : [];
+    if (altre.length) {
+      const { error: e2 } = await supabase.from(tabR).update({ codice_conto: conto })
+        .in('fattura_id', altre.map(q => q.docId)).in('descrizione', descr).or('codice_conto.is.null,codice_conto.eq.');
+      if (e2) throw e2;
+      altre.forEach(q => q.d.righe.forEach(r => { if (mancante(r.codice_conto) && descr.includes(r.descrizione)) r.codice_conto = conto; }));
+    }
   } else {
     const { error } = await supabase.from(p.tab).update({ codice_conto: conto, riconciliato: true }).eq('id', p.docId);
     if (error) throw error;
     p.d.contoMovimento = conto;
+    // movimenti con la stessa descrizione, banca e verso
+    const chiave = q => `${q.d.descrizione}|${q.d.banca}|${q.d.verso}`;
+    altre = tutte.filter(q => q !== p && q.tab === p.tab && !q.d.contoMovimento && chiave(q) === chiave(p));
+    if (altre.length) {
+      const { error: e2 } = await supabase.from(p.tab).update({ codice_conto: conto, riconciliato: true }).in('id', altre.map(q => q.docId));
+      if (e2) throw e2;
+      altre.forEach(q => { q.d.contoMovimento = conto; });
+    }
   }
-  Object.assign(p, costruisciScrittura(p.regola, p.origine, p.d));
+  [p, ...altre].forEach(q => Object.assign(q, costruisciScrittura(q.regola, q.origine, q.d)));
+  return altre;
 }
 
 function apriAnteprimaScritture(esito, origine) {
@@ -14247,9 +14268,9 @@ function apriAnteprimaScritture(esito, origine) {
       const i = Number(sl.dataset.fix);
       sl.disabled = true;
       try {
-        await assegnaContoMancante(proposte[i], sl.dataset.fixTipo, sl.value);
-        if (proposte[i].quadra) scelte.add(i);
-        st.className = 'status ok'; st.textContent = 'Conto assegnato.';
+        const altre = await assegnaContoMancante(proposte[i], sl.dataset.fixTipo, sl.value, proposte);
+        [proposte[i], ...altre].forEach(q => { if (q.quadra) scelte.add(proposte.indexOf(q)); });
+        st.className = 'status ok'; st.textContent = altre.length ? `Conto assegnato, e applicato ad altre ${altre.length} righe uguali (stesso ${sl.dataset.fixTipo === 'righe' ? 'fornitore e descrizione' : 'testo, banca e verso'}).` : 'Conto assegnato.';
       } catch (e) { st.className = 'status err'; st.textContent = 'Errore: ' + (e.message || e); }
       disegna();
     }));
