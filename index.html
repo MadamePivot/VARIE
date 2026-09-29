@@ -162,7 +162,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 235</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 236</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -13983,6 +13983,10 @@ const ORIGINI_SCRITTURE = {
   movimento_carta: { label: 'Movimento carta', tabella: 'movimenti_carta' },
 };
 const IMPORTI_SCRITTURE = { totale: 'Totale documento', imponibile: 'Imponibile', iva: 'IVA', importo: 'Importo movimento' };
+// i documenti precedenti all'apertura (situazione di partenza da Mexal) non generano scritture:
+// i loro saldi sono gia' nella scrittura di apertura
+const APERTURA_PRIMA_NOTA = { MADAME: '2021-05-03' };
+function dataMinimaScritture(azienda) { return /MADAME/i.test(azienda || '') ? APERTURA_PRIMA_NOTA.MADAME : null; }
 const r2 = n => Math.round((Number(n) || 0) * 100) / 100;
 
 let regoleScritture = null;
@@ -14078,7 +14082,7 @@ async function caricaDocumentiPerScritture(origine, dal, al) {
   const { data: gia, error: e2 } = await fetchTutteLeRighe(() => supabase.from('prima_nota').select('origine_id').eq('origine_tabella', tab).order('id'));
   if (e2) throw e2;
   const giaSet = new Set((gia || []).map(x => x.origine_id));
-  const nuovi = (docs || []).filter(x => !giaSet.has(x.id));
+  const nuovi = (docs || []).filter(x => !giaSet.has(x.id) && !(dataMinimaScritture(x.azienda) && String(x[campoData]).slice(0, 10) < dataMinimaScritture(x.azienda)));
   const righePerDoc = new Map();
   if (acq || vend) {
     const tabR = acq ? 'righe_fattura' : 'righe_fattura_vendita';
