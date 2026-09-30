@@ -164,7 +164,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 254</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 255</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14078,8 +14078,11 @@ function costruisciScrittura(regola, origine, d) {
     const aggiungi = (conto, importo, descr, controparte = null, fix = null) => {
       importo = r2(importo);
       if (!importo) return;
+      // importo negativo (storno, riga in diminuzione): si registra sul lato opposto, sempre con importo positivo
+      let latoRiga = lato;
+      if (importo < 0) { importo = -importo; latoRiga = lato === 'dare' ? 'avere' : 'dare'; }
       if (!conto) problemi.push('conto mancante: ' + descr);
-      out.push({ conto: conto || '', descrizione: descr, controparte, fix: conto ? null : fix, dare: lato === 'dare' ? importo : 0, avere: lato === 'avere' ? importo : 0 });
+      out.push({ conto: conto || '', descrizione: descr, controparte, fix: conto ? null : fix, dare: latoRiga === 'dare' ? importo : 0, avere: latoRiga === 'avere' ? importo : 0 });
     };
     if (t.conto === '@RIGHE') {
       // di default le righe si raggruppano per mastro (es. 10.0004 e 10.0007 -> 10.0000); il dettaglio resta
@@ -14113,8 +14116,8 @@ function costruisciScrittura(regola, origine, d) {
     dare = r2(out.reduce((s, r) => s + r.dare, 0)); avere = r2(out.reduce((s, r) => s + r.avere, 0));
   }
   if (!out.length) problemi.push('nessuna riga generata');
-  const quadra = dare === avere && dare > 0;
-  if (!quadra && out.length) problemi.push(`non quadra: dare ${fmtEUR(dare)} ≠ avere ${fmtEUR(avere)}`);
+  const quadra = dare === avere && out.length > 0;
+  if (!quadra && out.length) problemi.push(`non quadra: dare ${fmtEUR(dare)} ≠ avere ${fmtEUR(avere)} (differenza ${fmtEUR(r2(dare - avere))})`);
   return { righe: out, problemi, quadra: quadra && !problemi.some(p => p.startsWith('conto mancante')), dare, avere };
 }
 
