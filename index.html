@@ -164,7 +164,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 260</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 261</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14037,7 +14037,7 @@ function datiScrittura(origine, doc, righe, coll = null) {
   const avere = carta ? Math.max(0, -(Number(doc.importo) || 0)) : Number(doc.avere) || 0;
   const imp = r2(dare > 0 ? dare : avere);
   return { data: doc.data_operazione, azienda: doc.azienda, controparte: (coll && coll.nome) || doc.descrizione, collegamento: coll ? coll.tipo : 'nessuno', descrizione: (doc.descrizione || '').slice(0, 120), descrizioneCompleta: doc.descrizione || '',
-    totale: imp, imponibile: imp, iva: 0, importo: imp, nota_credito: false, tipoDoc: '', righe: [],
+    totale: imp, imponibile: imp, iva: 0, importo: imp, lordo: r2(Number(doc.lordo) || 0), nota_credito: false, tipoDoc: '', righe: [],
     verso: dare > 0 ? 'dare' : 'avere', banca: String((carta ? doc.carta : doc.banca) || '').toUpperCase(),
     numeroConto: String(doc.numero_conto || '').replace(/\s+/g, '').toUpperCase(),
     contoMovimento: doc.codice_conto || null };
@@ -14299,7 +14299,7 @@ async function caricaFattureAperteAcquisto() {
 // incassi: fatture di vendita non pagate con lo stesso importo dell'entrata (ricerca per importo, le fatture di vendita sono molte)
 async function caricaFattureVenditaPerImporti(importi) {
   // importo entro 2 centesimi: si cercano anche i valori vicini
-  const lista = [...new Set(importi.flatMap(x => [-0.02, -0.01, 0, 0.01, 0.02].map(d => r2(x + d))))];
+  const lista = [...new Set(importi.filter(x => x > 0).flatMap(x => [-0.02, -0.01, 0, 0.01, 0.02].map(d => r2(x + d))))];
   const trovate = [];
   for (let i = 0; i < lista.length; i += 100) {
     const { data, error } = await fetchTutteLeRighe(() => supabase.from('fatture_vendita').select('id,numero,data,cliente_denominazione,importo_totale,tipo_documento')
@@ -14338,6 +14338,30 @@ async function saldaDebitoPartitario(p, nome) {
 }
 
 // per un movimento in uscita: le fatture aperte con lo stesso importo, prima quelle il cui fornitore compare nella descrizione
+// ricerca manuale della controparte: fatture (di vendita per gli incassi, di acquisto per le uscite) il cui nome contiene il testo
+async function cercaFatturePerNome(p, testo) {
+  const vend = p.d.verso === 'avere';
+  const tabF = vend ? 'fatture_vendita' : 'fatture', col = vend ? 'cliente_denominazione' : 'fornitore_denominazione';
+  const modello = '%' + testo.trim().split(/\s+/).join('%') + '%';
+  const { data, error } = await fetchTutteLeRighe(() => supabase.from(tabF).select(`id,numero,data,tipo_documento,importo_totale,${col}`)
+    .in('azienda', vend ? AZIENDE_LETTURA_VENDITA : AZIENDE_LETTURA).ilike(col, modello).gte('data', APERTURA_PRIMA_NOTA.MADAME).order('data', { ascending: false }));
+  if (error) throw error;
+  const lista = (data || []).filter(f => !/^TD0?(4|8)$/.test(f.tipo_documento || '')).slice(0, 60);
+  if (!lista.length) return [];
+  const pagato = new Map();
+  for (let i = 0; i < lista.length; i += 100) {
+    const { data: pg } = await fetchTutteLeRighe(() => supabase.from('pagamenti_fatture').select('fattura_id,importo_allocato').eq('fattura_tipo', vend ? 'vendita' : 'acquisto').in('fattura_id', lista.slice(i, i + 100).map(f => f.id)).order('id'));
+    (pg || []).forEach(x => pagato.set(x.fattura_id, (pagato.get(x.fattura_id) || 0) + (Number(x.importo_allocato) || 0)));
+  }
+  return lista.map(f => ({ id: f.id, numero: f.numero, data: f.data, nome: f[col] || '', tipo: vend ? 'vendita' : 'acquisto', residuo: r2((Number(f.importo_totale) || 0) - (pagato.get(f.id) || 0)), totale: r2(f.importo_totale) }))
+    .filter(f => f.residuo > 0.01).sort((a, b) => Math.abs(a.residuo - p.d.importo) - Math.abs(b.residuo - p.d.importo)).slice(0, 6);
+}
+// nome del cliente dalla descrizione di un movimento (es. PayPal "T0006 - Goglia Luisa [ordine: ...]")
+function nomeDaDescrizione(t) {
+  const m = /^\S+\s+-\s+([^\[(]+?)\s*[\[(]/.exec(t || '') || /O\/C\s+(.+?)\s+RIF\./i.exec(t || '');
+  return m ? m[1].trim() : '';
+}
+
 // parole confrontabili anche con accenti e dieresi (STüSSI = STUESSI)
 const normParola = w => String(w).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ue/g, 'u').replace(/ae/g, 'a').replace(/oe/g, 'o');
 const paroleNorm = t => paroleSignificative(t).map(normParola);
@@ -14345,7 +14369,8 @@ function fattureCandidate(p, aperte) {
   const importo = p.d.importo, giorno = 86400000;
   const t0 = new Date(String(p.data).slice(0, 10)).getTime();
   const parole = new Set(paroleNorm(p.d.descrizioneCompleta || ''));
-  const c = aperte.filter(f => Math.abs(f.residuo - importo) <= 0.02 + 1e-9)
+  const importi = [importo, p.d.lordo].filter(x => x > 0);
+  const c = aperte.filter(f => importi.some(x => Math.abs(f.residuo - x) <= 0.02 + 1e-9))
     .map(f => ({ f, punti: paroleNorm(f.nome).filter(w => parole.has(w)).length, giorni: Math.abs(new Date(String(f.data).slice(0, 10)).getTime() - t0) / giorno }))
     // anche fatture emesse DOPO l'incasso (pagamento anticipato dell'ordine, e-commerce)
     .filter(x => x.giorni <= 400);
@@ -14362,7 +14387,7 @@ function rimatchProposta(p, regole) {
 
 async function collegaMovimentoAFattura(p, fatt) {
   const tipo = fatt.tipo || 'acquisto';
-  const { error } = await supabase.from('pagamenti_fatture').insert({ movimento_tabella: p.tab, movimento_id: p.docId, fattura_id: fatt.id, fattura_tipo: tipo, importo_allocato: p.d.importo });
+  const { error } = await supabase.from('pagamenti_fatture').insert({ movimento_tabella: p.tab, movimento_id: p.docId, fattura_id: fatt.id, fattura_tipo: tipo, importo_allocato: (Math.abs(fatt.residuo - p.d.importo) <= 0.02 || !(p.d.lordo > 0)) ? p.d.importo : Math.min(fatt.residuo, p.d.lordo) });
   if (error && error.code !== '23505') throw error;
   await aggiornaRiconciliatoMovimento(p.tab, p.docId);
   p.d.collegamento = tipo; p.d.controparte = fatt.nome || p.d.controparte;
@@ -14430,11 +14455,18 @@ async function apriAnteprimaScritture(esito, origine) {
   const suggerimenti = new Map();
   let fattureAperte = [], fattureVendita = [], debitiAperti = [];
   const suggerimentiHtml = (p, i, fix) => {
-    if (fix === 'movimento' && ((p.d.verso === 'dare' ? fattureAperte : fattureVendita).length || (p.d.verso === 'dare' && debitiAperti.length))) {
-      const c = fattureCandidate(p, p.d.verso === 'dare' ? fattureAperte : fattureVendita);
-      const deb = p.d.verso === 'dare' && !c.length ? debitiCandidati(p, debitiAperti) : [];
-      if (deb.length) return `<div style="margin-top:3px;">${deb.map(x => `<button type="button" class="btn" style="padding:1px 6px; font-size:10.5px; margin:1px 3px 1px 0;" data-salda="${i}" data-nome="${escR(x.d.nome)}" title="Nessuna fattura aperta con questo importo: il pagamento chiude il debito già presente in partitario (es. apertura da Mexal)">📒 Salda debito: ${escR(x.d.nome)} (saldo ${fmtEUR(x.d.saldo)})</button>`).join('')}</div>`;
-      return c.length ? `<div style="margin-top:3px;">${c.map(x => `<button type="button" class="btn" style="padding:1px 6px; font-size:10.5px; margin:1px 3px 1px 0;" data-collega="${i}" data-fatt="${x.f.id}" data-verso="${p.d.verso}" title="Collega il movimento a questa fattura aperta (stesso importo)${x.punti ? ' — fornitore riconosciuto nella descrizione' : ''}">🔗 Collega a fatt. ${escR(x.f.numero)} ${fmtDate(x.f.data)} — ${escR(x.f.nome)}${x.punti ? ' ✓' : ''}</button>`).join('')}</div>` : '';
+    const btn = 'class="btn" style="padding:1px 6px; font-size:10.5px; margin:1px 3px 1px 0;"';
+    if (fix === 'movimento') {
+      const trovate = p.d.ricerca || [];
+      const cercaBtn = `<button type="button" class="btn secondary" style="padding:1px 6px; font-size:10.5px; margin:1px 3px 1px 0;" data-cerca="${i}" title="Cerca tra le fatture per nome del cliente/fornitore, anche con importo diverso">🔍 Cerca fattura per nome…</button>`;
+      const lista = trovate.length ? trovate.map(f => `<button type="button" ${btn} data-collega="${i}" data-fatt="${f.id}" data-verso="${p.d.verso}">🔗 Fatt. ${escR(f.numero)} ${fmtDate(f.data)} — ${escR(f.nome)} — da pagare ${fmtEUR(f.residuo)}</button>`).join('')
+        : (p.d.verso === 'dare' ? fattureAperte : fattureVendita).length || debitiAperti.length ? (() => {
+          const c = fattureCandidate(p, p.d.verso === 'dare' ? fattureAperte : fattureVendita);
+          if (c.length) return c.map(x => `<button type="button" ${btn} data-collega="${i}" data-fatt="${x.f.id}" data-verso="${p.d.verso}" title="Collega il movimento a questa fattura (importo entro 2 centesimi)${x.punti ? ' — nome riconosciuto nella descrizione' : ''}">🔗 Collega a fatt. ${escR(x.f.numero)} ${fmtDate(x.f.data)} — ${escR(x.f.nome)}${x.punti ? ' ✓' : ''}</button>`).join('');
+          const deb = p.d.verso === 'dare' ? debitiCandidati(p, debitiAperti) : [];
+          return deb.map(x => `<button type="button" ${btn} data-salda="${i}" data-nome="${escR(x.d.nome)}" title="Nessuna fattura aperta con questo importo: il pagamento chiude il debito già presente in partitario (es. apertura da Mexal)">📒 Salda debito: ${escR(x.d.nome)} (saldo ${fmtEUR(x.d.saldo)})</button>`).join('');
+        })() : '';
+      return `<div style="margin-top:3px;">${lista}${cercaBtn}</div>`;
     }
     if (fix !== 'righe') return '';
     const l = suggerimenti.get(p.d.controparte) || [];
@@ -14519,6 +14551,19 @@ async function apriAnteprimaScritture(esito, origine) {
       } catch (e) { st.className = 'status err'; st.textContent = 'Errore: ' + (e.message || e); }
       disegna();
     };
+    box.querySelectorAll('[data-cerca]').forEach(b => b.addEventListener('click', async () => {
+      const i = Number(b.dataset.cerca), p = proposte[i];
+      const testo = prompt('Nome del ' + (p.d.verso === 'avere' ? 'cliente' : 'fornitore') + ' da cercare (anche solo una parte):', nomeDaDescrizione(p.d.descrizioneCompleta));
+      if (!testo || !testo.trim()) return;
+      b.disabled = true;
+      try {
+        p.d.ricerca = await cercaFatturePerNome(p, testo);
+        p.d.ricerca.forEach(f => { const arr = p.d.verso === 'dare' ? fattureAperte : fattureVendita; if (!arr.some(x => x.id === f.id)) arr.push(f); });
+        st.className = p.d.ricerca.length ? 'status ok' : 'status err';
+        st.textContent = p.d.ricerca.length ? `${p.d.ricerca.length} fatture da pagare trovate per "${testo}".` : `Nessuna fattura da pagare trovata per "${testo}".`;
+      } catch (e) { st.className = 'status err'; st.textContent = 'Errore: ' + (e.message || e); }
+      disegna();
+    }));
     box.querySelectorAll('[data-salda]').forEach(b => b.addEventListener('click', async () => {
       const i = Number(b.dataset.salda);
       b.disabled = true;
@@ -14575,7 +14620,7 @@ async function apriAnteprimaScritture(esito, origine) {
         fattureAperte = await caricaFattureAperteAcquisto();
         debitiAperti = await caricaPartitarioDebiti();
       }
-      const entrate = proposte.filter(p => p.d.verso === 'avere' && p.righe.some(r => r.fix === 'movimento')).map(p => p.d.importo);
+      const entrate = proposte.filter(p => p.d.verso === 'avere' && p.righe.some(r => r.fix === 'movimento')).flatMap(p => [p.d.importo, p.d.lordo]);
       if (entrate.length) fattureVendita = await caricaFattureVenditaPerImporti(entrate);
     } catch (e) { console.warn('fatture aperte:', e); }
   }
