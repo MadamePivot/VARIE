@@ -162,7 +162,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 249</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 250</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14311,8 +14311,10 @@ async function apriAnteprimaScritture(esito, origine) {
     document.getElementById('anteConti').innerHTML = [...mastri, ...dettagli].map(c => `<option value="${escR(voceConto(c))}"></option>`).join('') + '<option value="+ Nuova voce…"></option>';
   };
   const PAG = 60;
-  let pagina = 0, filtro = proposte.some(p => !p.quadra) ? 'problemi' : 'tutte';
-  const visibili = () => proposte.map((p, i) => i).filter(i => filtro === 'tutte' || (filtro === 'problemi' ? !proposte[i].quadra : proposte[i].quadra));
+  let pagina = 0, ricerca = '', filtro = proposte.some(p => !p.quadra) ? 'problemi' : 'tutte';
+  const testoDi = p => `${p.descrizione} ${p.d.controparte || ''} ${p.regola.nome} ${p.righe.map(r => r.conto + ' ' + (r.conto ? nomeContoGenerale(r.conto) : '') + ' ' + (r.descrizione || '')).join(' ')}`.toLowerCase();
+  const visibili = () => proposte.map((p, i) => i).filter(i => (filtro === 'tutte' || (filtro === 'problemi' ? !proposte[i].quadra : proposte[i].quadra))
+    && (!ricerca || ricerca.split(/\s+/).every(w => testoDi(proposte[i]).includes(w))));
   const corpo = () => visibili().slice(pagina * PAG, (pagina + 1) * PAG).map(i => { const p = proposte[i]; return p.righe.map((r, j) => `<tr${p.quadra ? '' : ' style="background:#fdeaea;"'}>
       <td>${j === 0 ? `<input type="checkbox" data-ante="${i}" ${p.quadra ? (scelte.has(i) ? 'checked' : '') : 'disabled'}>` : ''}</td>
       <td>${j === 0 ? fmtDate(p.data) : ''}</td><td style="white-space:normal; min-width:220px;">${j === 0 ? escR(p.descrizione) + `<div class="muted" style="font-size:10.5px;">${escR(p.regola.nome)}</div>` : ''}${j === 0 && p.problemi.length ? `<div style="color:var(--red); font-size:11px;">${escR(p.problemi.join(' · '))}</div>` : ''}</td>
@@ -14320,15 +14322,22 @@ async function apriAnteprimaScritture(esito, origine) {
         ? `<input type="text" list="anteConti" data-fix="${i}" data-fix-tipo="${r.fix}" placeholder="scrivi per cercare il conto…" style="width:270px; padding:4px;" title="${r.fix === 'righe' ? 'Assegna il conto a tutte le righe di questa fattura senza conto' : 'Assegna il conto a questo movimento'}">${suggerimentiHtml(p, i, r.fix)}`
         : '— manca —')}${r.controparte ? `<div class="muted" style="font-size:10.5px;">${escR(r.controparte)}</div>` : ''}</td>
       <td class="num" style="white-space:nowrap;">${r.dare ? fmtEUR(r.dare) : ''}</td><td class="num" style="white-space:nowrap;">${r.avere ? fmtEUR(r.avere) : ''}</td></tr>`).join(''); }).join('');
-  box.innerHTML = `<h2>Anteprima scritture — ${escR(ORIGINI_SCRITTURE[origine].label)}</h2>
-    <p class="muted" style="margin-top:0;" id="anteInfo"></p>
-    <div class="toolbar"><label><input type="checkbox" id="anteTutte" checked> Seleziona tutte le pronte</label>
-      <label title="Per fornitori ricorrenti (corrieri, utenze): la regola vale per tutte le sue righe senza conto, anche future, qualunque sia la descrizione"><input type="checkbox" id="anteFornitore"> Conto valido per tutto il fornitore</label>
-      <label>Mostra: <select id="anteFiltro"><option value="tutte">tutte</option><option value="problemi">solo con problemi</option><option value="pronte">solo pronte</option></select></label>
-      <button type="button" class="btn secondary" id="antePrec">◀</button><span class="muted" id="antePag"></span><button type="button" class="btn secondary" id="anteSucc">▶</button>
-      <button type="button" class="btn" id="anteRegistra">Registra selezionate</button><span class="muted" id="anteSel"></span></div>
-    <div class="status" id="anteStatus"></div>
-    <div style="max-height:60vh; overflow:auto;"><table class="data" style="width:100%;"><thead><tr><th></th><th>Data</th><th>Descrizione / regola</th><th>Conto</th><th class="num">Dare</th><th class="num">Avere</th></tr></thead><tbody id="anteCorpo"></tbody></table></div><datalist id="anteConti"></datalist>`;
+  box.innerHTML = `<div style="position:sticky; top:0; z-index:15; background:var(--card); margin:-20px -20px 8px; padding:14px 20px 8px; border-bottom:1px solid var(--line);">
+      <h2 style="margin:0 30px 4px 0; font-size:17px;">Anteprima scritture — ${escR(ORIGINI_SCRITTURE[origine].label)}</h2>
+      <p class="muted" style="margin:0 0 6px;" id="anteInfo"></p>
+      <div class="toolbar" style="margin:0 0 6px;">
+        <input type="text" id="anteCerca" placeholder="Filtra: fornitore, descrizione, conto…" style="min-width:260px; padding:4px;">
+        <label>Mostra: <select id="anteFiltro"><option value="tutte">tutte</option><option value="problemi">solo con problemi</option><option value="pronte">solo pronte</option></select></label>
+        <label title="Per fornitori ricorrenti (corrieri, utenze): la regola vale per tutte le sue righe senza conto, anche future, qualunque sia la descrizione"><input type="checkbox" id="anteFornitore"> Conto valido per tutto il fornitore</label>
+      </div>
+      <div class="toolbar" style="margin:0;">
+        <label><input type="checkbox" id="anteTutte" checked> Seleziona tutte le pronte</label>
+        <button type="button" class="btn secondary" id="antePrec">◀</button><span class="muted" id="antePag"></span><button type="button" class="btn secondary" id="anteSucc">▶</button>
+        <button type="button" class="btn" id="anteRegistra">Registra selezionate</button><span class="muted" id="anteSel"></span>
+      </div>
+      <div class="status" id="anteStatus" style="margin-top:4px;"></div>
+    </div>
+    <table class="data" style="width:100%;"><thead><tr><th></th><th>Data</th><th>Descrizione / regola</th><th>Conto</th><th class="num">Dare</th><th class="num">Avere</th></tr></thead><tbody id="anteCorpo"></tbody></table><datalist id="anteConti"></datalist>`;
   const cornice = box.parentElement;
   cornice.style.maxWidth = 'min(1200px, 96vw)';
   const chiudi = () => { overlay.style.display = 'none'; box.innerHTML = ''; cornice.style.maxWidth = '1000px'; };
@@ -14371,6 +14380,8 @@ async function apriAnteprimaScritture(esito, origine) {
     agg();
   };
   document.getElementById('anteFiltro').onchange = e => { filtro = e.target.value; pagina = 0; disegna(); };
+  let _tCerca;
+  document.getElementById('anteCerca').oninput = e => { clearTimeout(_tCerca); _tCerca = setTimeout(() => { ricerca = e.target.value.trim().toLowerCase(); pagina = 0; disegna(); }, 250); };
   document.getElementById('antePrec').onclick = () => { if (pagina > 0) { pagina--; disegna(); } };
   document.getElementById('anteSucc').onclick = () => { pagina++; disegna(); };
   document.getElementById('anteTutte').onchange = e => { proposte.forEach((p, i) => { if (p.quadra) { e.target.checked ? scelte.add(i) : scelte.delete(i); } }); disegna(); };
