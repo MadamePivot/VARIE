@@ -162,7 +162,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 250</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 251</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14311,10 +14311,17 @@ async function apriAnteprimaScritture(esito, origine) {
     document.getElementById('anteConti').innerHTML = [...mastri, ...dettagli].map(c => `<option value="${escR(voceConto(c))}"></option>`).join('') + '<option value="+ Nuova voce…"></option>';
   };
   const PAG = 60;
-  let pagina = 0, ricerca = '', filtro = proposte.some(p => !p.quadra) ? 'problemi' : 'tutte';
+  let pagina = 0, ricerca = '', colF = { data: '', desc: '', conto: '', dare: '', avere: '' }, filtro = proposte.some(p => !p.quadra) ? 'problemi' : 'tutte';
   const testoDi = p => `${p.descrizione} ${p.d.controparte || ''} ${p.regola.nome} ${p.righe.map(r => r.conto + ' ' + (r.conto ? nomeContoGenerale(r.conto) : '') + ' ' + (r.descrizione || '')).join(' ')}`.toLowerCase();
   const visibili = () => proposte.map((p, i) => i).filter(i => (filtro === 'tutte' || (filtro === 'problemi' ? !proposte[i].quadra : proposte[i].quadra))
-    && (!ricerca || ricerca.split(/\s+/).every(w => testoDi(proposte[i]).includes(w))));
+    && (!ricerca || ricerca.split(/\s+/).every(w => testoDi(proposte[i]).includes(w))) && colonneOk(proposte[i]));
+  // un filtro per colonna (tutti insieme); conto/dare/avere valgono se una qualsiasi riga della scrittura corrisponde
+  const parole = (t, testo) => !t || t.split(/\s+/).every(w => testo.includes(w));
+  const colonneOk = p => parole(colF.data, fmtDate(p.data))
+    && parole(colF.desc, `${p.descrizione} ${p.d.controparte || ''} ${p.regola.nome}`.toLowerCase())
+    && (!colF.conto || p.righe.some(r => parole(colF.conto, `${r.conto} ${r.conto ? nomeContoGenerale(r.conto) : ''} ${r.controparte || ''} ${r.descrizione || ''}`.toLowerCase())))
+    && (!colF.dare || p.righe.some(r => r.dare && fmtEUR(r.dare).includes(colF.dare.replace('.', ','))))
+    && (!colF.avere || p.righe.some(r => r.avere && fmtEUR(r.avere).includes(colF.avere.replace('.', ','))));
   const corpo = () => visibili().slice(pagina * PAG, (pagina + 1) * PAG).map(i => { const p = proposte[i]; return p.righe.map((r, j) => `<tr${p.quadra ? '' : ' style="background:#fdeaea;"'}>
       <td>${j === 0 ? `<input type="checkbox" data-ante="${i}" ${p.quadra ? (scelte.has(i) ? 'checked' : '') : 'disabled'}>` : ''}</td>
       <td>${j === 0 ? fmtDate(p.data) : ''}</td><td style="white-space:normal; min-width:220px;">${j === 0 ? escR(p.descrizione) + `<div class="muted" style="font-size:10.5px;">${escR(p.regola.nome)}</div>` : ''}${j === 0 && p.problemi.length ? `<div style="color:var(--red); font-size:11px;">${escR(p.problemi.join(' · '))}</div>` : ''}</td>
@@ -14337,7 +14344,13 @@ async function apriAnteprimaScritture(esito, origine) {
       </div>
       <div class="status" id="anteStatus" style="margin-top:4px;"></div>
     </div>
-    <table class="data" style="width:100%;"><thead><tr><th></th><th>Data</th><th>Descrizione / regola</th><th>Conto</th><th class="num">Dare</th><th class="num">Avere</th></tr></thead><tbody id="anteCorpo"></tbody></table><datalist id="anteConti"></datalist>`;
+    <table class="data" style="width:100%;"><thead><tr><th></th><th>Data</th><th>Descrizione / regola</th><th>Conto</th><th class="num">Dare</th><th class="num">Avere</th></tr>
+      <tr class="anteFiltri"><th></th>
+        <th><input type="text" data-colf="data" placeholder="filtra" style="width:92px; padding:3px;"></th>
+        <th><input type="text" data-colf="desc" placeholder="filtra" style="width:100%; min-width:180px; padding:3px;"></th>
+        <th><input type="text" data-colf="conto" placeholder="filtra" style="width:100%; min-width:170px; padding:3px;"></th>
+        <th><input type="text" data-colf="dare" placeholder="filtra" style="width:80px; padding:3px; text-align:right;"></th>
+        <th><input type="text" data-colf="avere" placeholder="filtra" style="width:80px; padding:3px; text-align:right;"></th></tr></thead><tbody id="anteCorpo"></tbody></table><datalist id="anteConti"></datalist>`;
   const cornice = box.parentElement;
   cornice.style.maxWidth = 'min(1200px, 96vw)';
   const chiudi = () => { overlay.style.display = 'none'; box.innerHTML = ''; cornice.style.maxWidth = '1000px'; };
@@ -14380,6 +14393,11 @@ async function apriAnteprimaScritture(esito, origine) {
     agg();
   };
   document.getElementById('anteFiltro').onchange = e => { filtro = e.target.value; pagina = 0; disegna(); };
+  let _tCol;
+  box.querySelectorAll('[data-colf]').forEach(inp => inp.addEventListener('input', () => {
+    clearTimeout(_tCol);
+    _tCol = setTimeout(() => { colF[inp.dataset.colf] = inp.value.trim().toLowerCase(); pagina = 0; disegna(); }, 250);
+  }));
   let _tCerca;
   document.getElementById('anteCerca').oninput = e => { clearTimeout(_tCerca); _tCerca = setTimeout(() => { ricerca = e.target.value.trim().toLowerCase(); pagina = 0; disegna(); }, 250); };
   document.getElementById('antePrec').onclick = () => { if (pagina > 0) { pagina--; disegna(); } };
