@@ -164,7 +164,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 264</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 265</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14037,7 +14037,7 @@ function datiScrittura(origine, doc, righe, coll = null) {
   const avere = carta ? Math.max(0, -(Number(doc.importo) || 0)) : Number(doc.avere) || 0;
   const imp = r2(dare > 0 ? dare : avere);
   return { data: doc.data_operazione, azienda: doc.azienda, controparte: (coll && coll.nome) || doc.descrizione, collegamento: coll ? coll.tipo : 'nessuno', descrizione: (doc.descrizione || '').slice(0, 120) + (Number(doc.lordo) && Number(doc.commissione) ? ` · lordo ${fmtEUR(Math.abs(Number(doc.lordo)))}, commissione ${fmtEUR(Math.abs(Number(doc.commissione)))}` : ''), descrizioneCompleta: doc.descrizione || '',
-    totale: imp, imponibile: imp, iva: 0, importo: imp, lordo: r2(Math.abs(Number(doc.lordo) || 0)), commissione: r2(Math.abs(Number(doc.commissione) || 0)), nota_credito: false, tipoDoc: '', righe: [],
+    totale: imp, imponibile: imp, iva: 0, importo: imp, lordoNoto: doc.lordo != null, lordo: r2(Math.abs(Number(doc.lordo) || 0)), commissione: r2(Math.abs(Number(doc.commissione) || 0)), nota_credito: false, tipoDoc: '', righe: [],
     verso: dare > 0 ? 'dare' : 'avere', banca: String((carta ? doc.carta : doc.banca) || '').toUpperCase(),
     numeroConto: String(doc.numero_conto || '').replace(/\s+/g, '').toUpperCase(),
     contoMovimento: doc.codice_conto || null };
@@ -14396,10 +14396,24 @@ function rimatchProposta(p, regole) {
   Object.assign(p, costruisciScrittura(p.regola, p.origine, p.d));
 }
 
+// l'incasso e' senza lordo ma la fattura e' un po' piu' alta del netto (commissione PayPal/Viva): il lordo e' l'importo della fattura
+function lordoDedotto(p, fatt) {
+  return p.d.verso === 'avere' && !(p.d.lordo > 0) && fatt.residuo > p.d.importo + 0.02 && fatt.residuo <= p.d.importo * 1.15 + 0.6;
+}
 async function collegaMovimentoAFattura(p, fatt) {
   const tipo = fatt.tipo || 'acquisto';
-  const { error } = await supabase.from('pagamenti_fatture').insert({ movimento_tabella: p.tab, movimento_id: p.docId, fattura_id: fatt.id, fattura_tipo: tipo, importo_allocato: (Math.abs(fatt.residuo - p.d.importo) <= 0.02 || !(p.d.lordo > 0)) ? p.d.importo : Math.min(fatt.residuo, p.d.lordo) });
+  const dedotto = lordoDedotto(p, fatt);
+  const allocato = dedotto ? fatt.residuo : ((Math.abs(fatt.residuo - p.d.importo) <= 0.02 || !(p.d.lordo > 0)) ? p.d.importo : Math.min(fatt.residuo, p.d.lordo));
+  const { error } = await supabase.from('pagamenti_fatture').insert({ movimento_tabella: p.tab, movimento_id: p.docId, fattura_id: fatt.id, fattura_tipo: tipo, importo_allocato: allocato });
   if (error && error.code !== '23505') throw error;
+  if (dedotto) {
+    // si scrivono lordo e commissione sul movimento (come fa "Recupera lordo e commissioni")
+    const comm = r2(fatt.residuo - p.d.importo);
+    const { error: e2 } = await supabase.from(p.tab).update({ lordo: fatt.residuo, commissione: comm }).eq('id', p.docId);
+    if (e2) throw e2;
+    p.d.lordo = fatt.residuo; p.d.commissione = comm; p.d.lordoNoto = true;
+    p.descrizione += ` · lordo ${fmtEUR(fatt.residuo)}, commissione ${fmtEUR(comm)}`;
+  }
   await aggiornaRiconciliatoMovimento(p.tab, p.docId);
   p.d.collegamento = tipo; p.d.controparte = fatt.nome || p.d.controparte;
 }
@@ -14465,15 +14479,16 @@ async function apriAnteprimaScritture(esito, origine) {
   // suggerimenti: i conti gia' usati per lo stesso fornitore/cliente, dal piu' frequente
   const suggerimenti = new Map();
   let fattureAperte = [], fattureVendita = [], debitiAperti = [];
+  const infoLordo = (p, f) => lordoDedotto(p, f) ? ` (lordo ${fmtEUR(f.residuo)}, commissione ${fmtEUR(r2(f.residuo - p.d.importo))})` : '';
   const suggerimentiHtml = (p, i, fix) => {
     const btn = 'class="btn" style="padding:1px 6px; font-size:10.5px; margin:1px 3px 1px 0;"';
     if (fix === 'movimento') {
       const trovate = p.d.ricerca || [];
       const cercaBtn = `<button type="button" class="btn secondary" style="padding:1px 6px; font-size:10.5px; margin:1px 3px 1px 0;" data-cerca="${i}" title="Cerca tra le fatture per nome del cliente/fornitore, anche con importo diverso">🔍 Cerca fattura per nome…</button>`;
-      const lista = trovate.length ? trovate.map(f => `<button type="button" ${btn} data-collega="${i}" data-fatt="${f.id}" data-verso="${p.d.verso}">🔗 Fatt. ${escR(f.numero)} ${fmtDate(f.data)} — ${escR(f.nome)} — da pagare ${fmtEUR(f.residuo)}</button>`).join('')
+      const lista = trovate.length ? trovate.map(f => `<button type="button" ${btn} data-collega="${i}" data-fatt="${f.id}" data-verso="${p.d.verso}">🔗 Fatt. ${escR(f.numero)} ${fmtDate(f.data)} — ${escR(f.nome)} — da pagare ${fmtEUR(f.residuo)}${infoLordo(p, f)}</button>`).join('')
         : (p.d.verso === 'dare' ? fattureAperte : fattureVendita).length || debitiAperti.length ? (() => {
           const c = fattureCandidate(p, p.d.verso === 'dare' ? fattureAperte : fattureVendita);
-          if (c.length) return c.map(x => `<button type="button" ${btn} data-collega="${i}" data-fatt="${x.f.id}" data-verso="${p.d.verso}" title="Collega il movimento a questa fattura (importo entro 2 centesimi)${x.punti ? ' — nome riconosciuto nella descrizione' : ''}">🔗 Collega a fatt. ${escR(x.f.numero)} ${fmtDate(x.f.data)} — ${escR(x.f.nome)} — € ${fmtEUR(x.f.residuo)}${x.punti ? ' ✓' : ''}</button>`).join('');
+          if (c.length) return c.map(x => `<button type="button" ${btn} data-collega="${i}" data-fatt="${x.f.id}" data-verso="${p.d.verso}" title="Collega il movimento a questa fattura (importo entro 2 centesimi)${x.punti ? ' — nome riconosciuto nella descrizione' : ''}">🔗 Collega a fatt. ${escR(x.f.numero)} ${fmtDate(x.f.data)} — ${escR(x.f.nome)} — € ${fmtEUR(x.f.residuo)}${infoLordo(p, x.f)}${x.punti ? ' ✓' : ''}</button>`).join('');
           const deb = p.d.verso === 'dare' ? debitiCandidati(p, debitiAperti) : [];
           return deb.map(x => `<button type="button" ${btn} data-salda="${i}" data-nome="${escR(x.d.nome)}" title="Nessuna fattura aperta con questo importo: il pagamento chiude il debito già presente in partitario (es. apertura da Mexal)">📒 Salda debito: ${escR(x.d.nome)} (saldo ${fmtEUR(x.d.saldo)})</button>`).join('');
         })() : '';
