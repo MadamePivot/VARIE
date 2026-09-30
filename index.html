@@ -164,7 +164,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 258</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 259</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14326,8 +14326,8 @@ async function caricaPartitarioDebiti() {
   return [...saldi].filter(([, v]) => v > 0.01).map(([nome, saldo]) => ({ nome, saldo }));
 }
 function debitiCandidati(p, debiti) {
-  const parole = new Set(paroleSignificative(p.d.descrizioneCompleta || ''));
-  return debiti.map(d => ({ d, punti: paroleSignificative(d.nome).filter(w => parole.has(w)).length })).filter(x => x.punti > 0)
+  const parole = new Set(paroleNorm(p.d.descrizioneCompleta || ''));
+  return debiti.map(d => ({ d, punti: paroleNorm(d.nome).filter(w => parole.has(w)).length })).filter(x => x.punti > 0)
     .sort((a, b) => b.punti - a.punti || b.d.saldo - a.d.saldo).slice(0, 3);
 }
 async function saldaDebitoPartitario(p, nome) {
@@ -14337,13 +14337,19 @@ async function saldaDebitoPartitario(p, nome) {
 }
 
 // per un movimento in uscita: le fatture aperte con lo stesso importo, prima quelle il cui fornitore compare nella descrizione
+// parole confrontabili anche con accenti e dieresi (STüSSI = STUESSI)
+const normParola = w => String(w).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ue/g, 'u').replace(/ae/g, 'a').replace(/oe/g, 'o');
+const paroleNorm = t => paroleSignificative(t).map(normParola);
 function fattureCandidate(p, aperte) {
-  const daData = String(p.data).slice(0, 10);
-  const importo = p.d.importo;
-  const parole = new Set(paroleSignificative(p.d.descrizioneCompleta || ''));
-  return aperte.filter(f => Math.abs(f.residuo - importo) <= 0.01 && String(f.data).slice(0, 10) <= daData)
-    .map(f => ({ f, punti: paroleSignificative(f.nome).filter(w => parole.has(w)).length }))
-    .sort((a, b) => b.punti - a.punti || String(b.f.data).localeCompare(String(a.f.data))).slice(0, 3);
+  const importo = p.d.importo, giorno = 86400000;
+  const t0 = new Date(String(p.data).slice(0, 10)).getTime();
+  const parole = new Set(paroleNorm(p.d.descrizioneCompleta || ''));
+  const c = aperte.filter(f => Math.abs(f.residuo - importo) <= 0.01)
+    .map(f => ({ f, punti: paroleNorm(f.nome).filter(w => parole.has(w)).length, giorni: Math.abs(new Date(String(f.data).slice(0, 10)).getTime() - t0) / giorno }))
+    // anche fatture emesse DOPO l'incasso (pagamento anticipato dell'ordine, e-commerce)
+    .filter(x => x.giorni <= 400);
+  const conNome = c.filter(x => x.punti > 0);
+  return (conNome.length ? conNome : c).sort((a, b) => b.punti - a.punti || a.giorni - b.giorni).slice(0, 3);
 }
 
 // dopo il collegamento la regola giusta puo' cambiare (da "uscita con conto" a "pagamento fornitore")
