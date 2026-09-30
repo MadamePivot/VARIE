@@ -164,7 +164,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 252</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 253</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -886,7 +886,7 @@
       <h2>Prima Nota (partita doppia)</h2>
       <p class="muted">Scritture in partita doppia generate dalle <strong>Regole scritture</strong> a partire da fatture di acquisto, fatture di vendita, movimenti bancari e movimenti carta. Ogni scrittura deve quadrare (dare = avere) per essere confermata. Un documento già registrato non viene proposto una seconda volta.</p>
       <div class="toolbar" style="flex-wrap:wrap;">
-        <label>Origine: <select id="pnOrigine"><option value="fattura_acquisto">Fatture acquisto</option><option value="fattura_vendita">Fatture vendita</option><option value="movimento_banca">Movimenti bancari</option><option value="movimento_carta">Movimenti carta</option></select></label>
+        <label>Origine: <select id="pnOrigine"><option value="fattura_acquisto">Fatture acquisto</option><option value="fattura_vendita">Fatture vendita</option><option value="movimento_banca">Movimenti bancari</option><option value="movimento_carta">Movimenti carta</option><option value="busta_paga">Buste paga</option></select></label>
         <label>Dal: <input type="date" id="pnDal" value="2021-05-03"></label>
         <label>Al: <input type="date" id="pnAl" value="2021-05-31"></label>
         <button class="btn" id="btnPnGenera">Genera scritture (anteprima)</button>
@@ -13988,8 +13988,11 @@ const ORIGINI_SCRITTURE = {
   fattura_vendita: { label: 'Fattura vendita', tabella: 'fatture_vendita' },
   movimento_banca: { label: 'Movimento bancario', tabella: 'movimenti_bancari' },
   movimento_carta: { label: 'Movimento carta', tabella: 'movimenti_carta' },
+  busta_paga: { label: 'Busta paga', tabella: 'buste_paga' },
 };
-const IMPORTI_SCRITTURE = { totale: 'Totale documento', imponibile: 'Imponibile', iva: 'IVA', importo: 'Importo movimento' };
+const IMPORTI_SCRITTURE = { totale: 'Totale documento', imponibile: 'Imponibile', iva: 'IVA', importo: 'Importo movimento',
+  lordo: 'Lordo busta', contributi_azienda: 'Contributi a carico azienda', netto: 'Netto in busta', inps: 'INPS (dipendente + azienda)', erario: 'IRPEF e addizionali',
+  altre_trattenute: 'Altre trattenute', residuo_avere: 'Differenza (in avere)', residuo_dare: 'Differenza (in dare)' };
 // i documenti precedenti all'apertura (situazione di partenza da Mexal) non generano scritture:
 // i loro saldi sono gia' nella scrittura di apertura
 const APERTURA_PRIMA_NOTA = { MADAME: '2021-05-03' };
@@ -14007,6 +14010,17 @@ async function loadRegoleScritture(forza = false) {
 
 // dati normalizzati di un documento/movimento per il confronto con le regole e il calcolo degli importi
 function datiScrittura(origine, doc, righe, coll = null) {
+  if (origine === 'busta_paga') {
+    const n = v => r2(Number(v) || 0);
+    const lordo = n(doc.totale_lordo), contrAz = n(doc.contributi_azienda), netto = n(doc.totale_netto);
+    const inps = r2(n(doc.contributi_dipendente) + contrAz);
+    const erario = r2(n(doc.irpef) + n(doc.addizionali_regionali) + n(doc.addizionali_comunali));
+    const altre = n(doc.altre_trattenute);
+    const res = r2(lordo + contrAz - (netto + inps + erario + altre));
+    return { data: doc.data, azienda: doc.azienda, controparte: doc.nome, descrizione: `Busta paga ${String(doc.mese).padStart(2, '0')}/${doc.anno} ${doc.nome || ''}`.trim(),
+      totale: netto, imponibile: lordo, iva: 0, importo: netto, lordo, contributi_azienda: contrAz, netto, inps, erario, altre_trattenute: altre,
+      residuo_avere: res > 0 ? res : 0, residuo_dare: res < 0 ? -res : 0, nota_credito: false, tipoDoc: '', righe: [], verso: null, banca: '', numeroConto: '', contoMovimento: null, collegamento: '' };
+  }
   if (origine === 'fattura_acquisto' || origine === 'fattura_vendita') {
     const acq = origine === 'fattura_acquisto';
     const totale = r2(doc.importo_totale);
@@ -14034,6 +14048,7 @@ function regolaScritturaCorrisponde(r, origine, d) {
   const alt = s => String(s).split('|').map(x => x.trim().toUpperCase()).filter(Boolean);
   const contiene = (testo, lista) => { const t = String(testo || '').toUpperCase(); return alt(lista).some(x => t.includes(x)); };
   if (r.verso && r.verso !== d.verso) return false;
+  if (r.conto_movimento && !alt(r.conto_movimento).some(x => (d.contoMovimento || '').startsWith(x))) return false;
   if (r.collegamento && d.collegamento && r.collegamento !== d.collegamento) return false;
   if (r.banca && !contiene(d.banca, r.banca)) return false;
   if (r.numero_conto && !alt(r.numero_conto).some(x => d.numeroConto.endsWith(x.replace(/\s+/g, '')))) return false;
@@ -14096,7 +14111,26 @@ function costruisciScrittura(regola, origine, d) {
   return { righe: out, problemi, quadra: quadra && !problemi.some(p => p.startsWith('conto mancante')), dare, avere };
 }
 
+async function caricaBustePaga(dal, al) {
+  const [{ data: buste, error }, { data: dip, error: e2 }] = await Promise.all([
+    fetchTutteLeRighe(() => supabase.from('buste_paga').select('*').order('anno').order('mese').order('id')),
+    fetchTutteLeRighe(() => supabase.from('dipendenti').select('id,nome,cognome').order('id'))]);
+  if (error) throw error;
+  if (e2) throw e2;
+  const nomi = new Map((dip || []).map(d => [d.id, `${d.cognome || ''} ${d.nome || ''}`.trim()]));
+  const docs = (buste || []).filter(b => AZIENDE_LETTURA.includes(b.azienda)).map(b => {
+    const ultimo = new Date(b.anno, b.mese, 0).getDate();
+    return { ...b, azienda: AZIENDA_SCRITTURA, nome: nomi.get(b.dipendente_id) || '', data: `${b.anno}-${String(b.mese).padStart(2, '0')}-${String(ultimo).padStart(2, '0')}` };
+  }).filter(b => (!dal || b.data >= dal) && (!al || b.data <= al));
+  const { data: gia, error: e3 } = await fetchTutteLeRighe(() => supabase.from('prima_nota').select('origine_id').eq('origine_tabella', 'buste_paga').order('id'));
+  if (e3) throw e3;
+  const giaSet = new Set((gia || []).map(x => x.origine_id));
+  const nuovi = docs.filter(b => !giaSet.has(b.id) && !(dataMinimaScritture(b.azienda) && b.data < dataMinimaScritture(b.azienda)));
+  return { tab: 'buste_paga', docs: nuovi, righePerDoc: new Map(), collegamenti: new Map(), totaleDocs: docs.length };
+}
+
 async function caricaDocumentiPerScritture(origine, dal, al) {
+  if (origine === 'busta_paga') return caricaBustePaga(dal, al);
   const tab = ORIGINI_SCRITTURE[origine].tabella;
   const acq = origine === 'fattura_acquisto', vend = origine === 'fattura_vendita';
   const campoData = (acq || vend) ? 'data' : 'data_operazione';

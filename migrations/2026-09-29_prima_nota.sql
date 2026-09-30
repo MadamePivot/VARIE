@@ -88,3 +88,9 @@ create index if not exists idx_mc_azienda_data on movimenti_carta(azienda, data_
 -- suggerimenti: conti gia' usati per lo stesso fornitore/cliente (funzione suggerimenti_conti_controparte nel database)
 create index if not exists idx_fatture_azienda_fornitore on fatture(azienda, fornitore_denominazione);
 create index if not exists idx_fatture_vendita_azienda_cliente on fatture_vendita(azienda, cliente_denominazione);
+
+-- buste paga e pagamento stipendi: nuova origine e condizione sul conto del movimento
+alter table regole_scritture drop constraint if exists regole_scritture_origine_check;
+alter table regole_scritture add constraint regole_scritture_origine_check check (origine in ('fattura_acquisto','fattura_vendita','movimento_banca','movimento_carta','busta_paga'));
+alter table regole_scritture add column if not exists conto_movimento text;
+-- conti 83.0003 Debiti v/dipendenti, 83.0004 INPS, 83.0005 trattenute, 84.0004 Erario c/ritenute (piano_conti, entrambe le aziende)
