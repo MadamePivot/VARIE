@@ -164,7 +164,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 253</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 254</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -13997,6 +13997,7 @@ const IMPORTI_SCRITTURE = { totale: 'Totale documento', imponibile: 'Imponibile'
 // i loro saldi sono gia' nella scrittura di apertura
 const APERTURA_PRIMA_NOTA = { MADAME: '2021-05-03' };
 function dataMinimaScritture(azienda) { return /MADAME/i.test(azienda || '') ? APERTURA_PRIMA_NOTA.MADAME : null; }
+const SOGLIA_ARROTONDAMENTO = 0.05; // euro
 const r2 = n => Math.round((Number(n) || 0) * 100) / 100;
 
 let regoleScritture = null;
@@ -14104,7 +14105,13 @@ function costruisciScrittura(regola, origine, d) {
     if (conto === '@MOVIMENTO') conto = d.contoMovimento;
     aggiungi(conto, d[t.importo] || 0, t.descrizione || IMPORTI_SCRITTURE[t.importo] || '', t.partitario ? (d.controparte || '') : null, t.conto === '@MOVIMENTO' ? 'movimento' : null);
   }
-  const dare = r2(out.reduce((s, r) => s + r.dare, 0)), avere = r2(out.reduce((s, r) => s + r.avere, 0));
+  let dare = r2(out.reduce((s, r) => s + r.dare, 0)), avere = r2(out.reduce((s, r) => s + r.avere, 0));
+  // differenza di pochi centesimi (IVA arrotondata riga per riga): si chiude su 87.0001 Arrotondamenti e abbuoni
+  const scarto = r2(dare - avere);
+  if ((origine === 'fattura_acquisto' || origine === 'fattura_vendita') && scarto !== 0 && Math.abs(scarto) <= SOGLIA_ARROTONDAMENTO && out.length) {
+    out.push({ conto: '87.0001', descrizione: 'Arrotondamento', controparte: null, fix: null, dare: scarto < 0 ? -scarto : 0, avere: scarto > 0 ? scarto : 0 });
+    dare = r2(out.reduce((s, r) => s + r.dare, 0)); avere = r2(out.reduce((s, r) => s + r.avere, 0));
+  }
   if (!out.length) problemi.push('nessuna riga generata');
   const quadra = dare === avere && dare > 0;
   if (!quadra && out.length) problemi.push(`non quadra: dare ${fmtEUR(dare)} ≠ avere ${fmtEUR(avere)}`);
