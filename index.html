@@ -164,7 +164,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 262</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 263</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14473,7 +14473,7 @@ async function apriAnteprimaScritture(esito, origine) {
       const lista = trovate.length ? trovate.map(f => `<button type="button" ${btn} data-collega="${i}" data-fatt="${f.id}" data-verso="${p.d.verso}">🔗 Fatt. ${escR(f.numero)} ${fmtDate(f.data)} — ${escR(f.nome)} — da pagare ${fmtEUR(f.residuo)}</button>`).join('')
         : (p.d.verso === 'dare' ? fattureAperte : fattureVendita).length || debitiAperti.length ? (() => {
           const c = fattureCandidate(p, p.d.verso === 'dare' ? fattureAperte : fattureVendita);
-          if (c.length) return c.map(x => `<button type="button" ${btn} data-collega="${i}" data-fatt="${x.f.id}" data-verso="${p.d.verso}" title="Collega il movimento a questa fattura (importo entro 2 centesimi)${x.punti ? ' — nome riconosciuto nella descrizione' : ''}">🔗 Collega a fatt. ${escR(x.f.numero)} ${fmtDate(x.f.data)} — ${escR(x.f.nome)}${x.punti ? ' ✓' : ''}</button>`).join('');
+          if (c.length) return c.map(x => `<button type="button" ${btn} data-collega="${i}" data-fatt="${x.f.id}" data-verso="${p.d.verso}" title="Collega il movimento a questa fattura (importo entro 2 centesimi)${x.punti ? ' — nome riconosciuto nella descrizione' : ''}">🔗 Collega a fatt. ${escR(x.f.numero)} ${fmtDate(x.f.data)} — ${escR(x.f.nome)} — € ${fmtEUR(x.f.residuo)}${x.punti ? ' ✓' : ''}</button>`).join('');
           const deb = p.d.verso === 'dare' ? debitiCandidati(p, debitiAperti) : [];
           return deb.map(x => `<button type="button" ${btn} data-salda="${i}" data-nome="${escR(x.d.nome)}" title="Nessuna fattura aperta con questo importo: il pagamento chiude il debito già presente in partitario (es. apertura da Mexal)">📒 Salda debito: ${escR(x.d.nome)} (saldo ${fmtEUR(x.d.saldo)})</button>`).join('');
         })() : '';
