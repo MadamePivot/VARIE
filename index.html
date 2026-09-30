@@ -164,7 +164,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 261</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 262</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14036,8 +14036,8 @@ function datiScrittura(origine, doc, righe, coll = null) {
   const dare = carta ? Math.max(0, Number(doc.importo) || 0) : Number(doc.dare) || 0;
   const avere = carta ? Math.max(0, -(Number(doc.importo) || 0)) : Number(doc.avere) || 0;
   const imp = r2(dare > 0 ? dare : avere);
-  return { data: doc.data_operazione, azienda: doc.azienda, controparte: (coll && coll.nome) || doc.descrizione, collegamento: coll ? coll.tipo : 'nessuno', descrizione: (doc.descrizione || '').slice(0, 120), descrizioneCompleta: doc.descrizione || '',
-    totale: imp, imponibile: imp, iva: 0, importo: imp, lordo: r2(Number(doc.lordo) || 0), nota_credito: false, tipoDoc: '', righe: [],
+  return { data: doc.data_operazione, azienda: doc.azienda, controparte: (coll && coll.nome) || doc.descrizione, collegamento: coll ? coll.tipo : 'nessuno', descrizione: (doc.descrizione || '').slice(0, 120) + (Number(doc.lordo) && Number(doc.commissione) ? ` · lordo ${fmtEUR(Math.abs(Number(doc.lordo)))}, commissione ${fmtEUR(Math.abs(Number(doc.commissione)))}` : ''), descrizioneCompleta: doc.descrizione || '',
+    totale: imp, imponibile: imp, iva: 0, importo: imp, lordo: r2(Math.abs(Number(doc.lordo) || 0)), commissione: r2(Math.abs(Number(doc.commissione) || 0)), nota_credito: false, tipoDoc: '', righe: [],
     verso: dare > 0 ? 'dare' : 'avere', banca: String((carta ? doc.carta : doc.banca) || '').toUpperCase(),
     numeroConto: String(doc.numero_conto || '').replace(/\s+/g, '').toUpperCase(),
     contoMovimento: doc.codice_conto || null };
@@ -14110,6 +14110,16 @@ function costruisciScrittura(regola, origine, d) {
   }
   let dare = r2(out.reduce((s, r) => s + r.dare, 0)), avere = r2(out.reduce((s, r) => s + r.avere, 0));
   // differenza di pochi centesimi (IVA arrotondata riga per riga): si chiude su 87.0001 Arrotondamenti e abbuoni
+  // incasso con commissione (PayPal, Viva...): il cliente ha pagato il LORDO, sul conto arriva il netto. La controparte
+  // (cliente o ricavo) va per il lordo e la differenza e' un costo di incasso su 62.0000 Commissioni di vendita e incasso
+  if ((origine === 'movimento_banca') && d.verso === 'avere' && d.commissione > 0.004 && d.lordo > 0 && Math.abs(d.lordo - d.importo - d.commissione) <= 0.02 && out.length) {
+    const ctr = out.filter(r => r.avere > 0);
+    if (ctr.length === 1) {
+      ctr[0].avere = r2(ctr[0].avere + d.commissione);
+      out.push({ conto: '62.0000', descrizione: 'Commissioni di incasso (lordo − netto)', controparte: null, fix: null, dare: d.commissione, avere: 0 });
+      dare = r2(out.reduce((s, r) => s + r.dare, 0)); avere = r2(out.reduce((s, r) => s + r.avere, 0));
+    }
+  }
   const scarto = r2(dare - avere);
   if ((origine === 'fattura_acquisto' || origine === 'fattura_vendita') && scarto !== 0 && Math.abs(scarto) <= SOGLIA_ARROTONDAMENTO && out.length) {
     out.push({ conto: '87.0001', descrizione: 'Arrotondamento', controparte: null, fix: null, dare: scarto < 0 ? -scarto : 0, avere: scarto > 0 ? scarto : 0 });
@@ -14341,6 +14351,7 @@ async function saldaDebitoPartitario(p, nome) {
 // ricerca manuale della controparte: fatture (di vendita per gli incassi, di acquisto per le uscite) il cui nome contiene il testo
 async function cercaFatturePerNome(p, testo) {
   const vend = p.d.verso === 'avere';
+  const dist = f => Math.min(...[p.d.importo, p.d.lordo].filter(x => x > 0).map(x => Math.abs(f.residuo - x)));
   const tabF = vend ? 'fatture_vendita' : 'fatture', col = vend ? 'cliente_denominazione' : 'fornitore_denominazione';
   const modello = '%' + testo.trim().split(/\s+/).join('%') + '%';
   const { data, error } = await fetchTutteLeRighe(() => supabase.from(tabF).select(`id,numero,data,tipo_documento,importo_totale,${col}`)
@@ -14354,7 +14365,7 @@ async function cercaFatturePerNome(p, testo) {
     (pg || []).forEach(x => pagato.set(x.fattura_id, (pagato.get(x.fattura_id) || 0) + (Number(x.importo_allocato) || 0)));
   }
   return lista.map(f => ({ id: f.id, numero: f.numero, data: f.data, nome: f[col] || '', tipo: vend ? 'vendita' : 'acquisto', residuo: r2((Number(f.importo_totale) || 0) - (pagato.get(f.id) || 0)), totale: r2(f.importo_totale) }))
-    .filter(f => f.residuo > 0.01).sort((a, b) => Math.abs(a.residuo - p.d.importo) - Math.abs(b.residuo - p.d.importo)).slice(0, 6);
+    .filter(f => f.residuo > 0.01).sort((a, b) => dist(a) - dist(b)).slice(0, 6);
 }
 // nome del cliente dalla descrizione di un movimento (es. PayPal "T0006 - Goglia Luisa [ordine: ...]")
 function nomeDaDescrizione(t) {
