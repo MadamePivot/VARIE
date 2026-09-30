@@ -164,7 +164,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 263</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 264</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14503,7 +14503,10 @@ async function apriAnteprimaScritture(esito, origine) {
     && (!colF.conto || p.righe.some(r => parole(colF.conto, `${r.conto} ${r.conto ? nomeContoGenerale(r.conto) : ''} ${r.controparte || ''} ${r.descrizione || ''}`.toLowerCase())))
     && (!colF.dare || p.righe.some(r => r.dare && fmtEUR(r.dare).includes(colF.dare.replace('.', ','))))
     && (!colF.avere || p.righe.some(r => r.avere && fmtEUR(r.avere).includes(colF.avere.replace('.', ','))));
-  const corpo = () => visibili().slice(pagina * PAG, (pagina + 1) * PAG).map(i => { const p = proposte[i]; return p.righe.map((r, j) => `<tr${p.quadra ? '' : ' style="background:#fdeaea;"'}>
+  // due toni di fondo che si alternano a ogni operazione (rosa per quelle con problemi)
+  const corpo = () => visibili().slice(pagina * PAG, (pagina + 1) * PAG).map((i, k) => { const p = proposte[i];
+    const fondo = p.quadra ? (k % 2 ? '#e9eff1' : '#ffffff') : (k % 2 ? '#f6d3d3' : '#fdeaea');
+    return p.righe.map((r, j) => `<tr style="background:${fondo};${j === 0 ? ' border-top:2px solid var(--line);' : ''}">
       <td>${j === 0 ? `<input type="checkbox" data-ante="${i}" ${p.quadra ? (scelte.has(i) ? 'checked' : '') : 'disabled'}>` : ''}</td>
       <td>${j === 0 ? fmtDate(p.data) : ''}</td><td style="white-space:normal; min-width:220px;">${j === 0 ? escR(p.descrizione) + `<div class="muted" style="font-size:10.5px;">${escR(p.regola.nome)}</div>` : ''}${j === 0 && p.problemi.length ? `<div style="color:var(--red); font-size:11px;">${escR(p.problemi.join(' · '))}</div>` : ''}</td>
       <td style="white-space:normal; min-width:200px;${r.conto ? '' : ' color:var(--red);'}">${r.conto ? escR(nomeContoGenerale(r.conto)) : (r.fix
@@ -14635,6 +14638,29 @@ async function apriAnteprimaScritture(esito, origine) {
       if (entrate.length) fattureVendita = await caricaFattureVenditaPerImporti(entrate);
     } catch (e) { console.warn('fatture aperte:', e); }
   }
+  // incassi con un nome nella descrizione (es. PayPal "T0006 - Nome Cognome [ordine...]") senza fattura riconosciuta:
+  // si cercano le fatture di quel cliente e si tengono quelle il cui importo e' compatibile con netto + commissione
+  try {
+    const daCercare = proposte.filter(p => p.d.verso === 'avere' && p.righe.some(r => r.fix === 'movimento') && nomeDaDescrizione(p.d.descrizioneCompleta)
+      && !fattureCandidate(p, fattureVendita).some(x => x.punti > 0));
+    if (daCercare.length) {
+      st.className = 'status'; st.textContent = `Cerco le fatture dei clienti per ${daCercare.length} incassi…`;
+      let idx = 0;
+      const lavora = async () => {
+        while (idx < daCercare.length) {
+          const p = daCercare[idx++];
+          try {
+            const trovate = await cercaFatturePerNome(p, nomeDaDescrizione(p.d.descrizioneCompleta));
+            const max = Math.max(p.d.lordo || 0, p.d.importo * 1.15 + 0.6);
+            const ok = trovate.filter(f => f.residuo >= p.d.importo - 0.02 && f.residuo <= max);
+            if (ok.length) { p.d.ricerca = ok; ok.forEach(f => { if (!fattureVendita.some(x => x.id === f.id)) fattureVendita.push(f); }); }
+          } catch (e) { /* si continua con gli altri */ }
+        }
+      };
+      await Promise.all([lavora(), lavora(), lavora(), lavora()]);
+      st.textContent = '';
+    }
+  } catch (e) { console.warn('ricerca automatica:', e); }
   // suggerimenti per i fornitori delle scritture senza conto (una sola chiamata)
   try {
     const nomi = [...new Set(proposte.filter(p => p.righe.some(r => r.fix === 'righe')).map(p => p.d.controparte).filter(Boolean))];
