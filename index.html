@@ -164,7 +164,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 256</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 257</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14296,11 +14296,32 @@ async function caricaFattureAperteAcquisto() {
     residuo: r2((Number(f.importo_totale) || 0) - (pagato.get(f.id) || 0) - (Number(f.pagato_altro) || 0)) })).filter(f => f.residuo > 0.01);
 }
 
+// incassi: fatture di vendita non pagate con lo stesso importo dell'entrata (ricerca per importo, le fatture di vendita sono molte)
+async function caricaFattureVenditaPerImporti(importi) {
+  const lista = [...new Set(importi.map(x => r2(x)))];
+  const trovate = [];
+  for (let i = 0; i < lista.length; i += 100) {
+    const { data, error } = await fetchTutteLeRighe(() => supabase.from('fatture_vendita').select('id,numero,data,cliente_denominazione,importo_totale,tipo_documento')
+      .in('azienda', AZIENDE_LETTURA_VENDITA).in('importo_totale', lista.slice(i, i + 100)).gte('data', APERTURA_PRIMA_NOTA.MADAME).order('id'));
+    if (error) throw error;
+    trovate.push(...(data || []));
+  }
+  if (!trovate.length) return [];
+  const pagate = new Set();
+  for (let i = 0; i < trovate.length; i += 100) {
+    const { data } = await fetchTutteLeRighe(() => supabase.from('pagamenti_fatture').select('fattura_id').eq('fattura_tipo', 'vendita').in('fattura_id', trovate.slice(i, i + 100).map(f => f.id)).order('id'));
+    (data || []).forEach(x => pagate.add(x.fattura_id));
+  }
+  return trovate.filter(f => !pagate.has(f.id) && !/^TD0?(4|8)$/.test(f.tipo_documento || ''))
+    .map(f => ({ id: f.id, numero: f.numero, data: f.data, nome: f.cliente_denominazione || '', residuo: r2(f.importo_totale), tipo: 'vendita' }));
+}
+
 // per un movimento in uscita: le fatture aperte con lo stesso importo, prima quelle il cui fornitore compare nella descrizione
 function fattureCandidate(p, aperte) {
+  const daData = String(p.data).slice(0, 10);
   const importo = p.d.importo;
   const parole = new Set(paroleSignificative(p.d.descrizioneCompleta || ''));
-  return aperte.filter(f => Math.abs(f.residuo - importo) <= 0.01 && String(f.data).slice(0, 10) <= String(p.data).slice(0, 10))
+  return aperte.filter(f => Math.abs(f.residuo - importo) <= 0.01 && String(f.data).slice(0, 10) <= daData)
     .map(f => ({ f, punti: paroleSignificative(f.nome).filter(w => parole.has(w)).length }))
     .sort((a, b) => b.punti - a.punti || String(b.f.data).localeCompare(String(a.f.data))).slice(0, 3);
 }
@@ -14313,10 +14334,11 @@ function rimatchProposta(p, regole) {
 }
 
 async function collegaMovimentoAFattura(p, fatt) {
-  const { error } = await supabase.from('pagamenti_fatture').insert({ movimento_tabella: p.tab, movimento_id: p.docId, fattura_id: fatt.id, fattura_tipo: 'acquisto', importo_allocato: p.d.importo });
+  const tipo = fatt.tipo || 'acquisto';
+  const { error } = await supabase.from('pagamenti_fatture').insert({ movimento_tabella: p.tab, movimento_id: p.docId, fattura_id: fatt.id, fattura_tipo: tipo, importo_allocato: p.d.importo });
   if (error && error.code !== '23505') throw error;
   await aggiornaRiconciliatoMovimento(p.tab, p.docId);
-  p.d.collegamento = 'acquisto'; p.d.controparte = fatt.nome || p.d.controparte;
+  p.d.collegamento = tipo; p.d.controparte = fatt.nome || p.d.controparte;
 }
 
 // assegna il conto mancante direttamente dall'anteprima: righe fattura senza conto, o conto del movimento
@@ -14379,11 +14401,11 @@ async function apriAnteprimaScritture(esito, origine) {
   // menu con poche voci: i mastri; in fondo "tutti i conti" per il dettaglio
   // suggerimenti: i conti gia' usati per lo stesso fornitore/cliente, dal piu' frequente
   const suggerimenti = new Map();
-  let fattureAperte = [];
+  let fattureAperte = [], fattureVendita = [];
   const suggerimentiHtml = (p, i, fix) => {
-    if (fix === 'movimento' && p.d.verso === 'dare' && fattureAperte.length) {
-      const c = fattureCandidate(p, fattureAperte);
-      return c.length ? `<div style="margin-top:3px;">${c.map(x => `<button type="button" class="btn" style="padding:1px 6px; font-size:10.5px; margin:1px 3px 1px 0;" data-collega="${i}" data-fatt="${x.f.id}" title="Collega il movimento a questa fattura aperta (stesso importo)${x.punti ? ' — fornitore riconosciuto nella descrizione' : ''}">🔗 Collega a fatt. ${escR(x.f.numero)} ${fmtDate(x.f.data)} — ${escR(x.f.nome)}${x.punti ? ' ✓' : ''}</button>`).join('')}</div>` : '';
+    if (fix === 'movimento' && (p.d.verso === 'dare' ? fattureAperte : fattureVendita).length) {
+      const c = fattureCandidate(p, p.d.verso === 'dare' ? fattureAperte : fattureVendita);
+      return c.length ? `<div style="margin-top:3px;">${c.map(x => `<button type="button" class="btn" style="padding:1px 6px; font-size:10.5px; margin:1px 3px 1px 0;" data-collega="${i}" data-fatt="${x.f.id}" data-verso="${p.d.verso}" title="Collega il movimento a questa fattura aperta (stesso importo)${x.punti ? ' — fornitore riconosciuto nella descrizione' : ''}">🔗 Collega a fatt. ${escR(x.f.numero)} ${fmtDate(x.f.data)} — ${escR(x.f.nome)}${x.punti ? ' ✓' : ''}</button>`).join('')}</div>` : '';
     }
     if (fix !== 'righe') return '';
     const l = suggerimenti.get(p.d.controparte) || [];
@@ -14469,11 +14491,11 @@ async function apriAnteprimaScritture(esito, origine) {
       disegna();
     };
     box.querySelectorAll('[data-collega]').forEach(b => b.addEventListener('click', async () => {
-      const i = Number(b.dataset.collega), fatt = fattureAperte.find(f => f.id === b.dataset.fatt);
+      const i = Number(b.dataset.collega), fatt = (b.dataset.verso === 'dare' ? fattureAperte : fattureVendita).find(f => f.id === b.dataset.fatt);
       b.disabled = true;
       try {
         await collegaMovimentoAFattura(proposte[i], fatt);
-        fattureAperte = fattureAperte.filter(f => f.id !== fatt.id);
+        fattureAperte = fattureAperte.filter(f => f.id !== fatt.id); fattureVendita = fattureVendita.filter(f => f.id !== fatt.id);
         rimatchProposta(proposte[i], regoleScritture);
         if (proposte[i].quadra) scelte.add(i);
         st.className = 'status ok'; st.textContent = `Movimento collegato alla fattura ${fatt.numero} di ${fatt.nome}.`;
@@ -14508,7 +14530,11 @@ async function apriAnteprimaScritture(esito, origine) {
   document.getElementById('anteTutte').onchange = e => { proposte.forEach((p, i) => { if (p.quadra) { e.target.checked ? scelte.add(i) : scelte.delete(i); } }); disegna(); };
   riempiDatalist();
   if ((origine === 'movimento_banca' || origine === 'movimento_carta') && proposte.some(p => p.righe.some(r => r.fix === 'movimento'))) {
-    try { fattureAperte = await caricaFattureAperteAcquisto(); } catch (e) { console.warn('fatture aperte:', e); }
+    try {
+      if (proposte.some(p => p.d.verso === 'dare' && p.righe.some(r => r.fix === 'movimento'))) fattureAperte = await caricaFattureAperteAcquisto();
+      const entrate = proposte.filter(p => p.d.verso === 'avere' && p.righe.some(r => r.fix === 'movimento')).map(p => p.d.importo);
+      if (entrate.length) fattureVendita = await caricaFattureVenditaPerImporti(entrate);
+    } catch (e) { console.warn('fatture aperte:', e); }
   }
   // suggerimenti per i fornitori delle scritture senza conto (una sola chiamata)
   try {
