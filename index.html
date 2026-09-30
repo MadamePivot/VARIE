@@ -164,7 +164,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 255</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 256</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14283,6 +14283,42 @@ async function creaVoceDaAnteprima() {
   return codice;
 }
 
+// fatture di acquisto ancora da pagare (residuo > 0) per suggerire il collegamento dei bonifici in uscita
+async function caricaFattureAperteAcquisto() {
+  const { data: fatt, error } = await fetchTutteLeRighe(() => supabase.from('fatture').select('id,numero,data,tipo_documento,importo_totale,fornitore_denominazione,pagato_altro')
+    .in('azienda', AZIENDE_LETTURA).gte('data', APERTURA_PRIMA_NOTA.MADAME).order('id'));
+  if (error) throw error;
+  const { data: pag, error: e2 } = await fetchTutteLeRighe(() => supabase.from('pagamenti_fatture').select('fattura_id,importo_allocato').eq('fattura_tipo', 'acquisto').order('id'));
+  if (e2) throw e2;
+  const pagato = new Map();
+  (pag || []).forEach(x => pagato.set(x.fattura_id, (pagato.get(x.fattura_id) || 0) + (Number(x.importo_allocato) || 0)));
+  return (fatt || []).filter(f => !/^TD0?(4|8)$/.test(f.tipo_documento || '')).map(f => ({ id: f.id, numero: f.numero, data: f.data, nome: f.fornitore_denominazione || '',
+    residuo: r2((Number(f.importo_totale) || 0) - (pagato.get(f.id) || 0) - (Number(f.pagato_altro) || 0)) })).filter(f => f.residuo > 0.01);
+}
+
+// per un movimento in uscita: le fatture aperte con lo stesso importo, prima quelle il cui fornitore compare nella descrizione
+function fattureCandidate(p, aperte) {
+  const importo = p.d.importo;
+  const parole = new Set(paroleSignificative(p.d.descrizioneCompleta || ''));
+  return aperte.filter(f => Math.abs(f.residuo - importo) <= 0.01 && String(f.data).slice(0, 10) <= String(p.data).slice(0, 10))
+    .map(f => ({ f, punti: paroleSignificative(f.nome).filter(w => parole.has(w)).length }))
+    .sort((a, b) => b.punti - a.punti || String(b.f.data).localeCompare(String(a.f.data))).slice(0, 3);
+}
+
+// dopo il collegamento la regola giusta puo' cambiare (da "uscita con conto" a "pagamento fornitore")
+function rimatchProposta(p, regole) {
+  const nuova = regole.find(r => regolaScritturaCorrisponde(r, p.origine, p.d));
+  if (nuova) p.regola = nuova;
+  Object.assign(p, costruisciScrittura(p.regola, p.origine, p.d));
+}
+
+async function collegaMovimentoAFattura(p, fatt) {
+  const { error } = await supabase.from('pagamenti_fatture').insert({ movimento_tabella: p.tab, movimento_id: p.docId, fattura_id: fatt.id, fattura_tipo: 'acquisto', importo_allocato: p.d.importo });
+  if (error && error.code !== '23505') throw error;
+  await aggiornaRiconciliatoMovimento(p.tab, p.docId);
+  p.d.collegamento = 'acquisto'; p.d.controparte = fatt.nome || p.d.controparte;
+}
+
 // assegna il conto mancante direttamente dall'anteprima: righe fattura senza conto, o conto del movimento
 async function assegnaContoMancante(p, tipo, conto, tutte = [], perFornitore = false) {
   const mancante = v => v == null || v === '';
@@ -14343,7 +14379,12 @@ async function apriAnteprimaScritture(esito, origine) {
   // menu con poche voci: i mastri; in fondo "tutti i conti" per il dettaglio
   // suggerimenti: i conti gia' usati per lo stesso fornitore/cliente, dal piu' frequente
   const suggerimenti = new Map();
+  let fattureAperte = [];
   const suggerimentiHtml = (p, i, fix) => {
+    if (fix === 'movimento' && p.d.verso === 'dare' && fattureAperte.length) {
+      const c = fattureCandidate(p, fattureAperte);
+      return c.length ? `<div style="margin-top:3px;">${c.map(x => `<button type="button" class="btn" style="padding:1px 6px; font-size:10.5px; margin:1px 3px 1px 0;" data-collega="${i}" data-fatt="${x.f.id}" title="Collega il movimento a questa fattura aperta (stesso importo)${x.punti ? ' — fornitore riconosciuto nella descrizione' : ''}">🔗 Collega a fatt. ${escR(x.f.numero)} ${fmtDate(x.f.data)} — ${escR(x.f.nome)}${x.punti ? ' ✓' : ''}</button>`).join('')}</div>` : '';
+    }
     if (fix !== 'righe') return '';
     const l = suggerimenti.get(p.d.controparte) || [];
     return l.length ? `<div style="margin-top:3px;">${l.map(x => `<button type="button" class="btn secondary" style="padding:1px 6px; font-size:10.5px; margin:1px 3px 1px 0;" data-sugg="${i}" data-conto="${x.conto}" title="usato ${x.n} volte per questo fornitore">${escR(nomeContoGenerale(x.conto).replace(/^\d\d\.\d{4} /, ''))} <span class="muted">${x.conto}</span></button>`).join('')}</div>` : '';
@@ -14427,6 +14468,18 @@ async function apriAnteprimaScritture(esito, origine) {
       } catch (e) { st.className = 'status err'; st.textContent = 'Errore: ' + (e.message || e); }
       disegna();
     };
+    box.querySelectorAll('[data-collega]').forEach(b => b.addEventListener('click', async () => {
+      const i = Number(b.dataset.collega), fatt = fattureAperte.find(f => f.id === b.dataset.fatt);
+      b.disabled = true;
+      try {
+        await collegaMovimentoAFattura(proposte[i], fatt);
+        fattureAperte = fattureAperte.filter(f => f.id !== fatt.id);
+        rimatchProposta(proposte[i], regoleScritture);
+        if (proposte[i].quadra) scelte.add(i);
+        st.className = 'status ok'; st.textContent = `Movimento collegato alla fattura ${fatt.numero} di ${fatt.nome}.`;
+      } catch (e) { st.className = 'status err'; st.textContent = 'Errore: ' + (e.message || e); }
+      disegna();
+    }));
     box.querySelectorAll('[data-sugg]').forEach(b => b.addEventListener('click', () => applica(Number(b.dataset.sugg), 'righe', b.dataset.conto, null)));
     box.querySelectorAll('[data-fix]').forEach(sl => sl.addEventListener('change', async () => {
       if (!sl.value) return;
@@ -14454,6 +14507,9 @@ async function apriAnteprimaScritture(esito, origine) {
   document.getElementById('anteSucc').onclick = () => { pagina++; disegna(); };
   document.getElementById('anteTutte').onchange = e => { proposte.forEach((p, i) => { if (p.quadra) { e.target.checked ? scelte.add(i) : scelte.delete(i); } }); disegna(); };
   riempiDatalist();
+  if ((origine === 'movimento_banca' || origine === 'movimento_carta') && proposte.some(p => p.righe.some(r => r.fix === 'movimento'))) {
+    try { fattureAperte = await caricaFattureAperteAcquisto(); } catch (e) { console.warn('fatture aperte:', e); }
+  }
   // suggerimenti per i fornitori delle scritture senza conto (una sola chiamata)
   try {
     const nomi = [...new Set(proposte.filter(p => p.righe.some(r => r.fix === 'righe')).map(p => p.d.controparte).filter(Boolean))];
