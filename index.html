@@ -164,7 +164,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 257</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 258</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14106,7 +14106,7 @@ function costruisciScrittura(regola, origine, d) {
     }
     let conto = t.conto;
     if (conto === '@MOVIMENTO') conto = d.contoMovimento;
-    aggiungi(conto, d[t.importo] || 0, t.descrizione || IMPORTI_SCRITTURE[t.importo] || '', t.partitario ? (d.controparte || '') : null, t.conto === '@MOVIMENTO' ? 'movimento' : null);
+    aggiungi(conto, d[t.importo] || 0, t.descrizione || IMPORTI_SCRITTURE[t.importo] || '', (t.partitario ? (d.controparte || '') : (t.conto === '@MOVIMENTO' && d.partitarioMov && /^83\.000[12]$/.test(conto || '') ? d.partitarioMov : null)), t.conto === '@MOVIMENTO' ? 'movimento' : null);
   }
   let dare = r2(out.reduce((s, r) => s + r.dare, 0)), avere = r2(out.reduce((s, r) => s + r.avere, 0));
   // differenza di pochi centesimi (IVA arrotondata riga per riga): si chiude su 87.0001 Arrotondamenti e abbuoni
@@ -14316,6 +14316,26 @@ async function caricaFattureVenditaPerImporti(importi) {
     .map(f => ({ id: f.id, numero: f.numero, data: f.data, nome: f.cliente_denominazione || '', residuo: r2(f.importo_totale), tipo: 'vendita' }));
 }
 
+// debiti verso fornitori ancora aperti nel partitario (apertura da Mexal + scritture registrate): servono per i pagamenti
+// che chiudono un debito senza una fattura del periodo (fatture precedenti all'apertura)
+async function caricaPartitarioDebiti() {
+  const { data, error } = await fetchTutteLeRighe(() => supabase.from('prima_nota_righe').select('controparte,dare,avere').eq('conto', '83.0001').not('controparte', 'is', null).order('id'));
+  if (error) throw error;
+  const saldi = new Map();
+  (data || []).forEach(x => saldi.set(x.controparte, r2((saldi.get(x.controparte) || 0) + (Number(x.avere) || 0) - (Number(x.dare) || 0))));
+  return [...saldi].filter(([, v]) => v > 0.01).map(([nome, saldo]) => ({ nome, saldo }));
+}
+function debitiCandidati(p, debiti) {
+  const parole = new Set(paroleSignificative(p.d.descrizioneCompleta || ''));
+  return debiti.map(d => ({ d, punti: paroleSignificative(d.nome).filter(w => parole.has(w)).length })).filter(x => x.punti > 0)
+    .sort((a, b) => b.punti - a.punti || b.d.saldo - a.d.saldo).slice(0, 3);
+}
+async function saldaDebitoPartitario(p, nome) {
+  const { error } = await supabase.from(p.tab).update({ codice_conto: '83.0001', riconciliato: true }).eq('id', p.docId);
+  if (error) throw error;
+  p.d.contoMovimento = '83.0001'; p.d.partitarioMov = nome;
+}
+
 // per un movimento in uscita: le fatture aperte con lo stesso importo, prima quelle il cui fornitore compare nella descrizione
 function fattureCandidate(p, aperte) {
   const daData = String(p.data).slice(0, 10);
@@ -14401,10 +14421,12 @@ async function apriAnteprimaScritture(esito, origine) {
   // menu con poche voci: i mastri; in fondo "tutti i conti" per il dettaglio
   // suggerimenti: i conti gia' usati per lo stesso fornitore/cliente, dal piu' frequente
   const suggerimenti = new Map();
-  let fattureAperte = [], fattureVendita = [];
+  let fattureAperte = [], fattureVendita = [], debitiAperti = [];
   const suggerimentiHtml = (p, i, fix) => {
-    if (fix === 'movimento' && (p.d.verso === 'dare' ? fattureAperte : fattureVendita).length) {
+    if (fix === 'movimento' && ((p.d.verso === 'dare' ? fattureAperte : fattureVendita).length || (p.d.verso === 'dare' && debitiAperti.length))) {
       const c = fattureCandidate(p, p.d.verso === 'dare' ? fattureAperte : fattureVendita);
+      const deb = p.d.verso === 'dare' && !c.length ? debitiCandidati(p, debitiAperti) : [];
+      if (deb.length) return `<div style="margin-top:3px;">${deb.map(x => `<button type="button" class="btn" style="padding:1px 6px; font-size:10.5px; margin:1px 3px 1px 0;" data-salda="${i}" data-nome="${escR(x.d.nome)}" title="Nessuna fattura aperta con questo importo: il pagamento chiude il debito già presente in partitario (es. apertura da Mexal)">📒 Salda debito: ${escR(x.d.nome)} (saldo ${fmtEUR(x.d.saldo)})</button>`).join('')}</div>`;
       return c.length ? `<div style="margin-top:3px;">${c.map(x => `<button type="button" class="btn" style="padding:1px 6px; font-size:10.5px; margin:1px 3px 1px 0;" data-collega="${i}" data-fatt="${x.f.id}" data-verso="${p.d.verso}" title="Collega il movimento a questa fattura aperta (stesso importo)${x.punti ? ' — fornitore riconosciuto nella descrizione' : ''}">🔗 Collega a fatt. ${escR(x.f.numero)} ${fmtDate(x.f.data)} — ${escR(x.f.nome)}${x.punti ? ' ✓' : ''}</button>`).join('')}</div>` : '';
     }
     if (fix !== 'righe') return '';
@@ -14490,6 +14512,17 @@ async function apriAnteprimaScritture(esito, origine) {
       } catch (e) { st.className = 'status err'; st.textContent = 'Errore: ' + (e.message || e); }
       disegna();
     };
+    box.querySelectorAll('[data-salda]').forEach(b => b.addEventListener('click', async () => {
+      const i = Number(b.dataset.salda);
+      b.disabled = true;
+      try {
+        await saldaDebitoPartitario(proposte[i], b.dataset.nome);
+        rimatchProposta(proposte[i], regoleScritture);
+        if (proposte[i].quadra) scelte.add(i);
+        st.className = 'status ok'; st.textContent = `Pagamento assegnato al debito verso ${b.dataset.nome}.`;
+      } catch (e) { st.className = 'status err'; st.textContent = 'Errore: ' + (e.message || e); }
+      disegna();
+    }));
     box.querySelectorAll('[data-collega]').forEach(b => b.addEventListener('click', async () => {
       const i = Number(b.dataset.collega), fatt = (b.dataset.verso === 'dare' ? fattureAperte : fattureVendita).find(f => f.id === b.dataset.fatt);
       b.disabled = true;
@@ -14531,7 +14564,10 @@ async function apriAnteprimaScritture(esito, origine) {
   riempiDatalist();
   if ((origine === 'movimento_banca' || origine === 'movimento_carta') && proposte.some(p => p.righe.some(r => r.fix === 'movimento'))) {
     try {
-      if (proposte.some(p => p.d.verso === 'dare' && p.righe.some(r => r.fix === 'movimento'))) fattureAperte = await caricaFattureAperteAcquisto();
+      if (proposte.some(p => p.d.verso === 'dare' && p.righe.some(r => r.fix === 'movimento'))) {
+        fattureAperte = await caricaFattureAperteAcquisto();
+        debitiAperti = await caricaPartitarioDebiti();
+      }
       const entrate = proposte.filter(p => p.d.verso === 'avere' && p.righe.some(r => r.fix === 'movimento')).map(p => p.d.importo);
       if (entrate.length) fattureVendita = await caricaFattureVenditaPerImporti(entrate);
     } catch (e) { console.warn('fatture aperte:', e); }
