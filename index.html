@@ -164,7 +164,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu laterale" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 259</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 260</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -14298,7 +14298,8 @@ async function caricaFattureAperteAcquisto() {
 
 // incassi: fatture di vendita non pagate con lo stesso importo dell'entrata (ricerca per importo, le fatture di vendita sono molte)
 async function caricaFattureVenditaPerImporti(importi) {
-  const lista = [...new Set(importi.map(x => r2(x)))];
+  // importo entro 2 centesimi: si cercano anche i valori vicini
+  const lista = [...new Set(importi.flatMap(x => [-0.02, -0.01, 0, 0.01, 0.02].map(d => r2(x + d))))];
   const trovate = [];
   for (let i = 0; i < lista.length; i += 100) {
     const { data, error } = await fetchTutteLeRighe(() => supabase.from('fatture_vendita').select('id,numero,data,cliente_denominazione,importo_totale,tipo_documento')
@@ -14344,7 +14345,7 @@ function fattureCandidate(p, aperte) {
   const importo = p.d.importo, giorno = 86400000;
   const t0 = new Date(String(p.data).slice(0, 10)).getTime();
   const parole = new Set(paroleNorm(p.d.descrizioneCompleta || ''));
-  const c = aperte.filter(f => Math.abs(f.residuo - importo) <= 0.01)
+  const c = aperte.filter(f => Math.abs(f.residuo - importo) <= 0.02 + 1e-9)
     .map(f => ({ f, punti: paroleNorm(f.nome).filter(w => parole.has(w)).length, giorni: Math.abs(new Date(String(f.data).slice(0, 10)).getTime() - t0) / giorno }))
     // anche fatture emesse DOPO l'incasso (pagamento anticipato dell'ordine, e-commerce)
     .filter(x => x.giorni <= 400);
