@@ -299,16 +299,18 @@
       .replace(/[^a-z0-9àèéìòù ]/g,' ')
       .replace(/\s+/g,' ').trim();
   }
+  function safeKey(s){ return s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zA-Z0-9._-]/g,'_'); }
   function cleanFileName(name){ return name.replace(/\s*\(\d+\)(?=\.[^.]+$)/,'').replace(/\s*\(\d+\)/g,''); }
   function aziendeOf(nome){ return meta[nome]?.aziende || []; }
   function areaOf(nome){ return meta[nome]?.area || 'Altro'; }
   function badges(nome){ return aziendeOf(nome).map(a=>`<span class="badge ${a}">${a==='MP'?'MP':'LAB'}</span>`).join(''); }
 
   /* ---------------- login ---------------- */
-  function showApp(){ $('login-screen').style.display='none'; $('app-screen').style.display='block'; load(); }
-  function showLogin(){ $('login-screen').style.display='flex'; $('app-screen').style.display='none'; }
-  supabase.auth.getSession().then(({data})=> data.session ? showApp() : showLogin());
-  supabase.auth.onAuthStateChange((_e,s)=> s ? showApp() : showLogin());
+  let loggedIn=null;
+  function showApp(){ if(loggedIn===true) return; loggedIn=true; $('login-screen').style.display='none'; $('app-screen').style.display='block'; load(); }
+  function showLogin(){ if(loggedIn===false) return; loggedIn=false; $('login-screen').style.display='flex'; $('app-screen').style.display='none'; }
+  // le chiamate a Supabase dentro onAuthStateChange possono bloccarsi: le rimando con setTimeout
+  supabase.auth.onAuthStateChange((_e,s)=> setTimeout(()=> s ? showApp() : showLogin(), 0));
 
   $('login-form').addEventListener('submit', async e=>{
     e.preventDefault();
@@ -382,10 +384,11 @@
   }
 
   function renderArchive(){
+    const aperti=new Set([...document.querySelectorAll('details.proj[open]')].map(d=>d.dataset.nome));
     const nomi=Object.keys(groups).sort((a,b)=>new Date(groups[b][0].created_at)-new Date(groups[a][0].created_at));
     $('archive-list').innerHTML = nomi.map(nome=>{
       const vs=groups[nome], az=aziendeOf(nome);
-      return `<details class="proj" data-nome="${esc(nome)}">
+      return `<details class="proj" data-nome="${esc(nome)}"${aperti.has(nome)?' open':''}>
         <summary>
           <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m9 6 6 6-6 6"/></svg>
           <span class="sum-name">${esc(nome)}</span> ${badges(nome)}
@@ -434,6 +437,7 @@
     if(e.target.classList.contains('rename')){
       const vecchio=proj.dataset.nome, nuovo=(prompt('Nuovo nome del programma:',vecchio)||'').trim();
       if(!nuovo || nuovo===vecchio) return;
+      if(groups[nuovo]) return alert('Esiste già un programma chiamato "'+nuovo+'".');
       const { error } = await supabase.from('progetti_versioni').update({nome_progetto:nuovo}).eq('nome_progetto',vecchio);
       if(error) return alert('Errore: '+error.message);
       await supabase.from('progetti_meta').delete().eq('nome_progetto',vecchio);
@@ -486,10 +490,10 @@
   }
 
   function nextVersion(nome, filename){
-    const m=filename.match(/v(?:er)?\.?\s*(\d+)/i);
+    const m=filename.match(/(?:^|[^a-z])v(?:er)?\.?\s*(\d+)/i);
     if(m) return 'v'+parseInt(m[1],10);
-    const n=(groups[nome]?.length||0)+1;
-    return 'v'+n;
+    const nums=(groups[nome]||[]).map(v=>parseInt(String(v.versione).replace(/\D/g,''),10)).filter(Number.isFinite);
+    return 'v'+((nums.length?Math.max(...nums):0)+1);
   }
 
   function onProjectChange(){
@@ -554,7 +558,7 @@
 
     const btn=$('c-ok'); btn.disabled=true; btn.textContent='Caricamento…';
     const nomeFile=cleanFileName(file.name);
-    const path=`${nome.replace(/[^a-zA-Z0-9_-]/g,'_')}/${Date.now()}_${nomeFile}`;
+    const path=`${safeKey(nome)}/${Date.now()}_${safeKey(nomeFile)}`;
     const { error:upErr } = await supabase.storage.from(BUCKET).upload(path,file,{contentType:file.type||'text/html'});
     if(upErr){ btn.disabled=false; btn.textContent='Carica versione'; return setStatus('Errore nel caricamento: '+upErr.message,'err'); }
 
