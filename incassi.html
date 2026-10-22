@@ -114,6 +114,11 @@
 
   <main>
     <div id="status">Caricamento…</div>
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <button class="btn" id="tab-clienti">Clienti con fatture aperte</button>
+      <button class="btn ghost" id="tab-incassi">Incassi da abbinare</button>
+    </div>
+    <div id="vista-clienti">
 
     <div class="kpis">
       <div class="kpi"><div class="l">Da incassare</div><div class="v red" id="k-tot">–</div></div>
@@ -159,6 +164,20 @@
         </tr></thead>
         <tbody id="tbody"></tbody>
       </table>
+    </div>
+    </div>
+
+    <div id="vista-incassi" class="hidden">
+      <div class="card">
+        <div class="filters">
+          <div><label for="i-dal">Incassi dal</label><input class="input" id="i-dal" type="date"></div>
+          <div><label for="i-txt">Testo nella descrizione</label><input class="input" id="i-txt" type="search" placeholder="nome, causale…"></div>
+          <div><label for="i-min">Residuo minimo (€)</label><input class="input" id="i-min" type="number" step="0.01" value="1"></div>
+          <div><button class="btn" id="i-cerca" style="width:100%">Cerca incassi</button></div>
+        </div>
+        <div class="hint">Entrate bancarie non ancora abbinate per intero. Un incasso può pagare una fattura, più fatture, oppure solo una parte: l'importo di ogni fattura si può modificare. Le fatture proposte sono quelle caricate con il filtro “Fatture dal” della prima vista.</div>
+      </div>
+      <div class="card scroll"><div id="inc-lista" class="hint">Premi “Cerca incassi”.</div></div>
     </div>
   </main>
 </div>
@@ -324,7 +343,7 @@
       let h = `<tr class="cliente" data-k="${esc(c.k)}">
         <td><b>${esc(c.nome)}</b>
           <button class="mini" data-apri="${esc(c.k)}">${open ? 'Nascondi fatture' : 'Fatture aperte'}</button>
-          <button class="mini pri" data-assoc="${esc(c.k)}">Associa</button>
+          <button class="mini pri" data-assoc="${esc(c.k)}">Abbina</button>
           <div class="muted mono" style="font-size:11px">${esc(c.piva)}</div></td>
         <td class="num">${c.nf}</td>
         <td class="num"><b>${eur(c.residuo)}</b></td>
@@ -338,7 +357,7 @@
           righe.map(r => `<tr><td>${esc(r.sezionale || '')} ${esc(r.numero)}</td><td>${fmtDate(r.data)}</td>
             <td class="num">${eur(r.tot)}</td><td class="num">${eur(r.pagato)}</td><td class="num"><b>${eur(r.residuo)}</b></td>
             <td class="num">${pillRitardo(r.ritardo)}</td>
-            <td class="num"><button class="mini pri" data-assoc="${esc(c.k)}" data-fatt="${r.id}">Associa</button></td></tr>`).join('') +
+            <td class="num"><button class="mini pri" data-assoc="${esc(c.k)}" data-fatt="${r.id}">Abbina</button></td></tr>`).join('') +
           `</tbody></table></td></tr>`;
       }
       return h;
@@ -374,7 +393,7 @@
     $('modal').classList.remove('hidden');
     $('modal-box').innerHTML = `
       <div style="display:flex;justify-content:space-between;gap:10px">
-        <div><div class="eyebrow">Associa incasso</div><h2>${esc(c.nome)}</h2></div>
+        <div><div class="eyebrow">Abbina incasso</div><h2>${esc(c.nome)}</h2></div>
         <button class="mini" id="m-close">Chiudi</button></div>
       <h3>1. Fatture da saldare</h3><div id="m-fatt"></div>
       <h3>2. Movimento bancario incassato</h3>
@@ -403,17 +422,8 @@
     }));
   }
 
-  async function cercaMovimenti() {
-    $('m-movs').textContent = 'Ricerca…';
-    try {
-      let q = supabase.from('movimenti_bancari')
-        .select('id,data_operazione,descrizione,avere,lordo,banca,riconciliato')
-        .gt('avere', 0).eq('riconciliato', false).order('data_operazione', { ascending: false }).limit(60);
-      const dal = $('m-dal').value; if (dal) q = q.gte('data_operazione', dal);
-      const txt = $('m-txt').value.trim().replace(/[%,()]/g, ' '); if (txt) q = q.ilike('descrizione', '%' + txt + '%');
-      const imp = Number($('m-imp').value);
-      if (imp > 0) q = q.gte('avere', imp * 0.9).lte('avere', imp * 1.1);
-      const { data, error } = await q; if (error) throw error;
+  // aggiunge a ogni movimento: importo gia' abbinato, residuo e stato della sua scrittura in prima nota
+  async function arricchisci(data) {
       let giaAll = new Map();
       if (data.length) {
         const { data: links, error: e2 } = await supabase.from('pagamenti_fatture').select('movimento_id,importo_allocato')
@@ -434,10 +444,24 @@
           if (!scr.has(p.origine_id) || st === 'anticipo') scr.set(p.origine_id, st);
         }
       }
-      AS.movs = data.map(m => {
+      return data.map(m => {
         const tot = Number(m.lordo) > 0 && Number(m.avere) > 0 ? Math.abs(Number(m.lordo)) : Number(m.avere);
         return { ...m, scr: scr.get(m.id) || 'nessuna', tot, gia: giaAll.get(m.id) || 0, residuo: r2(tot - (giaAll.get(m.id) || 0)) };
       }).filter(m => m.residuo > 0.02);
+  }
+
+  async function cercaMovimenti() {
+    $('m-movs').textContent = 'Ricerca…';
+    try {
+      let q = supabase.from('movimenti_bancari')
+        .select('id,data_operazione,descrizione,avere,lordo,banca,riconciliato')
+        .gt('avere', 0).eq('riconciliato', false).order('data_operazione', { ascending: false }).limit(60);
+      const dal = $('m-dal').value; if (dal) q = q.gte('data_operazione', dal);
+      const txt = $('m-txt').value.trim().replace(/[%,()]/g, ' '); if (txt) q = q.ilike('descrizione', '%' + txt + '%');
+      const imp = Number($('m-imp').value);
+      if (imp > 0) q = q.gte('avere', imp * 0.9).lte('avere', imp * 1.1);
+      const { data, error } = await q; if (error) throw error;
+      AS.movs = await arricchisci(data);
       $('m-movs').className = '';
       $('m-movs').innerHTML = AS.movs.length ? AS.movs.map(m => `<div class="mrow ${AS.mov === m.id ? 'sel' : ''}" data-m="${m.id}">
         <span class="mono">${fmtDate(m.data_operazione)}</span>
@@ -470,10 +494,10 @@
     if (!m || !scelte.length) { $('m-ass').className = 'hint'; $('m-ass').textContent = 'Scegli prima fatture e movimento.'; return; }
     $('m-ass').className = '';
     $('m-ass').innerHTML = scelte.map(r => `<div class="mrow" style="cursor:default">
-      <span class="d">${esc(r.sezionale || '')} ${esc(r.numero)} · residuo ${eur(r.residuo)}</span>
+      <span class="d">${r.cliente ? '<b>' + esc(r.cliente) + '</b> · ' : ''}${esc(r.sezionale || '')} ${esc(r.numero)} · residuo ${eur(r.residuo)}</span>
       <input class="input amt" type="number" step="0.01" min="0" data-a="${r.id}" value="${AS.importi[r.id] ?? 0}"></div>`).join('') +
       `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:12px;flex-wrap:wrap">
-        <div id="m-tot" class="muted"></div><button class="btn" id="m-ok">Associa</button></div>`;
+        <div id="m-tot" class="muted"></div><button class="btn" id="m-ok">Abbina</button></div>`;
     $('m-ass').querySelectorAll('input').forEach(i => i.addEventListener('input', () => { AS.importi[i.dataset.a] = Number(i.value) || 0; totale(); }));
     $('m-ok').onclick = conferma; totale();
   }
@@ -527,7 +551,105 @@
       : scritte === attese ? `✓ ${scritte} scritture di scalo anticipo create in bozza (da confermare in prima nota).` : `⚠ Create ${scritte} scritture su ${attese} attese: controlla la prima nota.`;
     $('m-ass').innerHTML = ''; $('m-fatt').innerHTML = ''; $('m-movs').innerHTML = '';
     $('m-msg').innerHTML = `<b>${idLink.length} collegament${idLink.length === 1 ? 'o scritto' : 'i scritti'}.</b><br>${esc(esito)}<br><br><button class="btn" id="m-fine">Chiudi e aggiorna elenco</button>`;
-    $('m-fine').onclick = () => { chiudiModale(); DATI = null; carica(); };
+    $('m-fine').onclick = () => { chiudiModale(); DATI = null; carica(); if (!$('vista-incassi').classList.contains('hidden')) caricaIncassi(); };
+  }
+
+  // ---------- vista "Incassi da abbinare": parte dal pagamento ----------
+  let INC = [];
+  function mostraVista(v) {
+    $('vista-clienti').classList.toggle('hidden', v !== 'clienti');
+    $('vista-incassi').classList.toggle('hidden', v !== 'incassi');
+    $('tab-clienti').className = 'btn' + (v === 'clienti' ? '' : ' ghost');
+    $('tab-incassi').className = 'btn' + (v === 'incassi' ? '' : ' ghost');
+    if (v === 'incassi' && !INC.length) caricaIncassi();
+  }
+  $('tab-clienti').onclick = () => mostraVista('clienti');
+  $('tab-incassi').onclick = () => mostraVista('incassi');
+  $('i-cerca').onclick = () => caricaIncassi();
+  { const d = new Date(); d.setDate(d.getDate() - 120); $('i-dal').value = d.toISOString().slice(0, 10); }
+
+  async function caricaIncassi() {
+    $('inc-lista').className = 'hint'; $('inc-lista').textContent = 'Ricerca…';
+    try {
+      let q = supabase.from('movimenti_bancari').select('id,data_operazione,descrizione,avere,lordo,banca,riconciliato')
+        .gt('avere', 0).eq('riconciliato', false).order('data_operazione', { ascending: false }).limit(300);
+      const dal = $('i-dal').value; if (dal) q = q.gte('data_operazione', dal);
+      const txt = $('i-txt').value.trim().replace(/[%,()]/g, ' '); if (txt) q = q.ilike('descrizione', '%' + txt + '%');
+      const { data, error } = await q; if (error) throw error;
+      const min = Number($('i-min').value) || 0;
+      INC = (await arricchisci(data)).filter(m => m.residuo >= min);
+      $('inc-lista').className = '';
+      $('inc-lista').innerHTML = INC.length ? INC.map(m => `<div class="mrow" style="cursor:default">
+        <span class="mono">${fmtDate(m.data_operazione)}</span>
+        <span class="d" title="${esc(m.descrizione)}">${esc(m.descrizione)}</span>
+        <span class="muted" style="font-size:12px">${esc(m.banca || '')}</span>
+        <span class="pill ${ETICHETTA_SCR[m.scr][0]}">${ETICHETTA_SCR[m.scr][1]}</span>
+        <span class="mono" style="text-align:right;min-width:120px"><b>${eur(m.residuo)}</b>${m.gia > 0.01 ? `<br><span class="muted" style="font-size:11px">già abbinati ${eur(m.gia)}</span>` : ''}</span>
+        <button class="mini pri" data-abbina-mov="${m.id}">Abbina</button></div>`).join('')
+        : 'Nessun incasso da abbinare con questi filtri.';
+    } catch (e) { $('inc-lista').textContent = 'Errore: ' + (e.message || e); }
+  }
+  $('inc-lista').addEventListener('click', e => {
+    const b = e.target.closest('button[data-abbina-mov]'); if (b) apriAbbinaPagamento(b.dataset.abbinaMov);
+  });
+
+  // fatture di vendita ancora aperte di tutti i clienti (stesso calcolo della vista clienti)
+  function fattureAperte() {
+    const { fatture, pf, ig } = DATI;
+    const metodo = $('f-metodo').value, azienda = $('f-azienda').value;
+    const sumPf = new Map(), sumIg = new Map();
+    pf.forEach(p => sumPf.set(p.fattura_id, (sumPf.get(p.fattura_id) || 0) + Number(p.importo_allocato || 0)));
+    ig.forEach(p => sumIg.set(p.fattura_vendita_id, (sumIg.get(p.fattura_vendita_id) || 0) + Number(p.importo || 0)));
+    const out = [];
+    for (const f of fatture) {
+      if (f.tipo_documento === 'TD04' || f.annullata_ndc || (azienda && f.azienda !== azienda)) continue;
+      const tot = Number(f.importo_totale) || 0, a = sumPf.get(f.id) || 0, b = sumIg.get(f.id) || 0;
+      const pagato = metodo === 'somma' ? a + b : metodo === 'banca' ? a : metodo === 'gest' ? b : Math.max(a, b);
+      const residuo = r2(tot - pagato);
+      if (residuo < 0.02) continue;
+      out.push({ ...f, tot, pagato, residuo, cliente: f.cliente_denominazione || '(senza nome)' });
+    }
+    return out;
+  }
+
+  function apriAbbinaPagamento(movId) {
+    const m = INC.find(x => x.id === movId); if (!m) return;
+    if (!DATI) { alert('Dati fatture non ancora caricati: attendi e riprova.'); return; }
+    AS = { c: null, righe: [], sel: new Set(), importi: {}, mov: m.id, movs: [m], pool: new Map(), tutte: fattureAperte() };
+    $('modal').classList.remove('hidden');
+    $('modal-box').innerHTML = `
+      <div style="display:flex;justify-content:space-between;gap:10px">
+        <div><div class="eyebrow">Abbina incasso</div><h2>${esc(m.descrizione.slice(0, 90))}</h2></div>
+        <button class="mini" id="m-close">Chiudi</button></div>
+      <div class="muted" style="margin-top:6px">${fmtDate(m.data_operazione)} · ${esc(m.banca || '')} · incasso ${eur(m.tot)}${m.gia > 0.01 ? ` · già abbinati ${eur(m.gia)}` : ''} · <b>da abbinare ${eur(m.residuo)}</b>
+        <span class="pill ${ETICHETTA_SCR[m.scr][0]}">${ETICHETTA_SCR[m.scr][1]}</span></div>
+      <h3>1. Fatture pagate da questo incasso</h3>
+      <div class="srch"><div><label>Cerca per cliente o numero fattura</label><input class="input" id="m-q" placeholder="es. Rossi oppure 1234"></div></div>
+      <div id="m-fatt" style="margin-top:8px"></div>
+      <div id="m-movs"></div>
+      <h3>2. Importi da assegnare</h3>
+      <div id="m-ass" class="hint">Scegli una o più fatture. Puoi pagarne una, più fatture, o solo una parte: modifica gli importi a mano.</div>
+      <div id="m-msg"></div>`;
+    $('m-close').onclick = chiudiModale;
+    $('m-q').addEventListener('input', ridisegnaCandidate);
+    ridisegnaCandidate();
+  }
+
+  function ridisegnaCandidate() {
+    const q = norm($('m-q').value);
+    const trovate = AS.tutte.filter(f => !AS.pool.has(f.id) && (!q || norm(f.cliente).includes(q) || norm(f.numero).includes(q)))
+      .sort((a, b) => b.data.localeCompare(a.data)).slice(0, 80);
+    const riga = (f, on) => `<label class="mrow"><input type="checkbox" data-f="${f.id}" ${on ? 'checked' : ''}>
+      <span class="d"><b>${esc(f.cliente)}</b> · ${esc(f.sezionale || '')} ${esc(f.numero)} · ${fmtDate(f.data)}</span>
+      <span class="mono">${eur(f.residuo)}</span></label>`;
+    $('m-fatt').innerHTML = [...AS.pool.values()].map(f => riga(f, true)).join('') + trovate.map(f => riga(f, false)).join('') ||
+      '<div class="hint">Nessuna fattura aperta trovata.</div>';
+    $('m-fatt').querySelectorAll('input').forEach(i => i.addEventListener('change', () => {
+      const f = AS.tutte.find(x => x.id === i.dataset.f);
+      if (i.checked) { AS.pool.set(f.id, f); AS.sel.add(f.id); } else { AS.pool.delete(f.id); AS.sel.delete(f.id); }
+      AS.righe = [...AS.pool.values()].sort((a, b) => a.data.localeCompare(b.data));
+      ripartisci(); ridisegnaAssegnazione(); ridisegnaCandidate();
+    }));
   }
 
   document.querySelectorAll('th[data-k]').forEach(th => th.addEventListener('click', () => {
