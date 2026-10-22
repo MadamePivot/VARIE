@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Carica dati gestionale · Madame Pivot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F6F3EE; --card:#FFFFFF; --soft:#F1ECE4; --line:#E6E0D5;
+    --ink:#1F2421; --ink-2:#646B66;
+    --accent:#2F6F5E; --accent-2:#245446; --accent-bg:#E4EFEA;
+    --danger:#A8453A; --danger-bg:#F6E4E1; --warn:#B07A1C; --warn-bg:#F8EDD5;
+    --shadow:0 1px 2px rgba(31,36,33,.04), 0 4px 16px rgba(31,36,33,.05);
+    --r:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:'Inter',system-ui,sans-serif;font-size:14px;line-height:1.5;min-height:100vh}
+  .hidden{display:none!important}
+  h1{font-family:'Fraunces',serif;font-weight:600;font-size:26px;margin:4px 0 0}
+  .eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:600}
+  main{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+  .card{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);padding:18px 20px;margin-bottom:16px}
+  .card h2{font-size:16px;margin:0 0 4px}
+  .muted{color:var(--ink-2)}
+  .input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#FCFBF9;font:inherit}
+  .btn{border:none;border-radius:10px;padding:10px 16px;font-weight:600;font:inherit;font-weight:600;background:var(--accent);color:#fff;cursor:pointer}
+  .btn:hover{background:var(--accent-2)} .btn:disabled{opacity:.5;cursor:default}
+  .btn.ghost{background:transparent;color:var(--ink-2);border:1px solid var(--line)}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+  .bar{height:10px;background:var(--soft);border-radius:99px;overflow:hidden;margin-top:12px}
+  .bar>i{display:block;height:100%;width:0;background:var(--accent);transition:width .15s}
+  .log{font-size:13px;margin-top:10px;white-space:pre-wrap}
+  .ok{color:var(--accent-2)} .ko{color:var(--danger)}
+  #login{max-width:380px;margin:12vh auto 0}
+  .mono{font-family:'IBM Plex Mono',monospace;font-size:12px}
+</style>
+</head>
+<body>
+<main>
+  <div id="login" class="card hidden">
+    <div class="eyebrow">Madame Pivot</div><h1>Accedi</h1>
+    <form id="login-form" style="margin-top:16px">
+      <input class="input" id="email" type="email" placeholder="Email" autocomplete="username" required style="margin-bottom:10px">
+      <input class="input" id="password" type="password" placeholder="Password" autocomplete="current-password" required>
+      <div class="row"><button class="btn" type="submit">Entra</button></div>
+      <div class="log ko" id="login-err"></div>
+    </form>
+  </div>
+
+  <div id="app" class="hidden">
+    <div class="eyebrow">Madame Pivot</div>
+    <h1>Carica dati dal gestionale</h1>
+    <p class="muted">Due file, due caricamenti. Si può ripetere quando si vuole: le righe già presenti vengono aggiornate per ID, non duplicate. Non tocca contabilità né prima nota: riempie solo tabelle di appoggio.</p>
+
+    <div class="card">
+      <h2>1. Elenco fatture (CSV)</h2>
+      <div class="muted">L'export dell'elenco fatture del gestionale, con le colonne ID, S., Num., Data, Cliente, Totale, Stato.</div>
+      <div class="row"><input type="file" id="f-fatture" accept=".csv,text/csv"><button class="btn" id="go-fatture" disabled>Carica fatture</button></div>
+      <div class="bar"><i id="bar-fatture"></i></div><div class="log" id="log-fatture"></div>
+    </div>
+
+    <div class="card">
+      <h2>2. Pagamenti (SQL di phpMyAdmin)</h2>
+      <div class="muted">Il file .sql della tabella pagamenti (solo FATT e FATT-NDC). Leggo soltanto le righe di dati: nessun altro comando del file viene eseguito.</div>
+      <div class="row"><input type="file" id="f-pagamenti" accept=".sql,text/plain"><button class="btn" id="go-pagamenti" disabled>Carica pagamenti</button></div>
+      <div class="bar"><i id="bar-pagamenti"></i></div><div class="log" id="log-pagamenti"></div>
+    </div>
+
+    <div class="row"><button class="btn ghost" id="logout-btn">Esci</button></div>
+  </div>
+</main>
+
+<script type="module">
+  import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+  // stesso progetto e stessa chiave pubblica degli altri programmi: i dati sono protetti dal login (RLS)
+  const SUPABASE_URL = 'https://qwexiqicubanmodaebua.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF3ZXhpcWljdWJhbm1vZGFlYnVhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NTk4MjUsImV4cCI6MjA5OTUzNTgyNX0.Z24OBYkn5SDO41IbfJYljO7yua6d_FNB4_rj5agnDPs';
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const $ = id => document.getElementById(id);
+
+  // ---------- login ----------
+  const mostra = ok => { $('login').classList.toggle('hidden', ok); $('app').classList.toggle('hidden', !ok); };
+  supabase.auth.getSession().then(({ data }) => mostra(!!data.session));
+  supabase.auth.onAuthStateChange((_e, s) => mostra(!!s));
+  $('login-form').addEventListener('submit', async e => {
+    e.preventDefault(); $('login-err').textContent = '';
+    const { error } = await supabase.auth.signInWithPassword({ email: $('email').value, password: $('password').value });
+    if (error) $('login-err').textContent = 'Accesso non riuscito: ' + error.message;
+  });
+  $('logout-btn').addEventListener('click', () => supabase.auth.signOut());
+
+  // ---------- lettura CSV (virgolette doppie, campi con a-capo) ----------
+  function leggiCsv(testo) {
+    const righe = []; let r = [], c = '', q = false;
+    for (let i = 0; i < testo.length; i++) {
+      const ch = testo[i];
+      if (q) {
+        if (ch === '"') { if (testo[i + 1] === '"') { c += '"'; i++; } else q = false; } else c += ch;
+      } else if (ch === '"') q = true;
+      else if (ch === ',') { r.push(c); c = ''; }
+      else if (ch === '\n' || ch === '\r') { if (ch === '\r' && testo[i + 1] === '\n') i++; r.push(c); c = ''; if (r.length > 1 || r[0] !== '') righe.push(r); r = []; }
+      else c += ch;
+    }
+    if (c !== '' || r.length) { r.push(c); righe.push(r); }
+    return righe;
+  }
+  const numIt = s => Number(String(s).replace(/\./g, '').replace(',', '.'));   // "1.234,50" o "122,95"
+  const numCsv = s => Number(String(s).replace(',', '.'));                      // l'export usa la virgola decimale senza migliaia
+
+  function fattureDaCsv(testo) {
+    const righe = leggiCsv(testo.replace(/^﻿/, ''));
+    const h = righe[0] || [];
+    if (h[0] !== 'ID' || h[1] !== 'S.' || h[2] !== 'Num.' || h[3] !== 'Data' || h[16] !== 'Stato')
+      throw new Error('Intestazione inattesa: servono le colonne ID, S., Num., Data, …, Totale, Stato come nell\'export dell\'elenco fatture.');
+    const out = [], scarti = [];
+    for (const r of righe.slice(1)) {
+      const tot = numCsv(r[15]);
+      if (r.length < 17 || !/^\d+$/.test(r[0]) || !/^\d{4}-\d{2}-\d{2}$/.test(r[3]) || !Number.isFinite(tot) || !['F', 'N'].includes(r[4])) { scarti.push(r.slice(0, 5).join(' ')); continue; }
+      out.push({
+        id_gest: Number(r[0]), sezionale: r[1], numero: r[2], data: r[3], tipo: r[4],
+        codice_cliente: r[5] || null, cliente: (r[6] || '').trim(), totale: tot,
+        stato: r[16].replace(/<[^>]*>/g, '').trim(),
+      });
+    }
+    return { righe: out, scarti };
+  }
+
+  // ---------- lettura SQL: solo le righe di dati delle INSERT, mai altri comandi ----------
+  const COLONNE = {   // colonna del gestionale -> colonna della tabella di appoggio, con il tipo
+    IDpaga: ['id_paga', 'int'], datapagamento: ['data_pagamento', 'data'], TipoRegistrazione: ['tipo_registrazione', 'txt'],
+    id_fattura: ['id_fattura', 'int'], id_notula: ['id_notula', 'int'], id_corrispettivo: ['id_corrispettivo', 'int'],
+    id_prebolla: ['id_prebolla', 'int'], AnnoFattura: ['anno_fattura', 'int'], nfattura: ['nfattura', 'int'],
+    tipopagamentoID: ['id_tipo_pagamento', 'int'], id_banca: ['id_banca', 'int'], id_transazione: ['id_transazione', 'txt'],
+    impagato: ['importo', 'num'], CostoIncasso: ['costo_incasso', 'num'], id_cliente: ['id_cliente', 'int'],
+    importo_abbuono: ['importo_abbuono', 'num'], conto_abbuono: ['conto_abbuono', 'txt'], inviato_contabilita: ['inviato_contabilita', 'data'],
+  };
+  const TOKEN = /NULL|'(?:[^'\\]|\\.|'')*'|-?\d+(?:\.\d+)?/g;
+
+  function pagamentiDaSql(testo) {
+    let cols = null; const out = [], scarti = [], comandi = {};
+    for (const riga of testo.split('\n')) {
+      if (riga.startsWith('INSERT INTO')) {
+        const m = /\(([^)]*)\)\s*VALUES/.exec(riga);
+        cols = m ? m[1].split(',').map(s => s.trim().replace(/`/g, '')) : null;
+      } else if (riga.startsWith('(') && cols) {
+        const t = riga.trim().match(TOKEN);
+        if (!t || t.length !== cols.length) { scarti.push(riga.slice(0, 60)); continue; }
+        const o = {};
+        t.forEach((x, i) => {
+          const def = COLONNE[cols[i]]; if (!def) return;
+          let v = x === 'NULL' ? null : x[0] === "'" ? x.slice(1, -1).replace(/''/g, "'").replace(/\\'/g, "'") : x;
+          if (v !== null) {
+            if (def[1] === 'int') v = parseInt(v, 10);
+            else if (def[1] === 'num') v = Number(v);
+            else if (def[1] === 'data') v = /^\d{4}-\d{2}-\d{2}$/.test(v) && v !== '0000-00-00' ? v : null;
+          }
+          o[def[0]] = v;
+        });
+        if (!Number.isInteger(o.id_paga) || !Number.isFinite(o.importo)) { scarti.push(riga.slice(0, 60)); continue; }
+        out.push(o);
+      } else if (/^(DROP|DELETE|UPDATE|TRUNCATE)\b/i.test(riga)) {
+        const k = riga.split(/\s+/)[0].toUpperCase(); comandi[k] = (comandi[k] || 0) + 1;   // segnalati, mai eseguiti
+      }
+    }
+    return { righe: out, scarti, comandi };
+  }
+
+  // ---------- caricamento a blocchi ----------
+  async function carica(tabella, righe, conflitto, barId, logId) {
+    const log = $(logId), bar = $(barId); const BLOCCO = 500; let fatte = 0;
+    for (let i = 0; i < righe.length; i += BLOCCO) {
+      const { error } = await supabase.from(tabella).upsert(righe.slice(i, i + BLOCCO), { onConflict: conflitto });
+      if (error) { log.innerHTML += `\n<span class="ko">Errore dopo ${fatte} righe: ${error.message}</span>`; return false; }
+      fatte += Math.min(BLOCCO, righe.length - i); bar.style.width = (100 * fatte / righe.length) + '%';
+    }
+    return true;
+  }
+
+  async function conteggio(tabella) {
+    const { count, error } = await supabase.from(tabella).select('*', { count: 'exact', head: true });
+    return error ? '?' : count;
+  }
+
+  function collega(inputId, btnId, logId, barId, leggi, tabella, conflitto, riepilogo) {
+    let dati = null;
+    $(inputId).addEventListener('change', async e => {
+      const f = e.target.files[0]; $(btnId).disabled = true; $(logId).textContent = ''; $(barId).style.width = '0';
+      if (!f) return;
+      try {
+        dati = leggi(await f.text());
+        let t = `Lette ${dati.righe.length.toLocaleString('it-IT')} righe da ${f.name}.\n` + riepilogo(dati.righe);
+        if (dati.scarti.length) t += `\n<span class="ko">Righe non leggibili: ${dati.scarti.length} (prima: ${dati.scarti[0]})</span>`;
+        if (dati.comandi && Object.keys(dati.comandi).length) t += `\nNel file ci sono comandi che NON eseguo: ${Object.entries(dati.comandi).map(([k, n]) => k + ' ×' + n).join(', ')}.`;
+        $(logId).innerHTML = t; $(btnId).disabled = !dati.righe.length;
+      } catch (err) { dati = null; $(logId).innerHTML = `<span class="ko">${err.message}</span>`; }
+    });
+    $(btnId).addEventListener('click', async () => {
+      if (!dati) return; $(btnId).disabled = true;
+      const prima = await conteggio(tabella);
+      const ok = await carica(tabella, dati.righe, conflitto, barId, logId);
+      const dopo = await conteggio(tabella);
+      $(logId).innerHTML += ok ? `\n<span class="ok">✓ Fatto. Righe in tabella: prima ${prima}, dopo ${dopo}.</span>` : '';
+      $(btnId).disabled = false;
+    });
+  }
+
+  const it = n => n.toLocaleString('it-IT', { maximumFractionDigits: 2 });
+  collega('f-fatture', 'go-fatture', 'log-fatture', 'bar-fatture', fattureDaCsv, 'gest_fatture_testata', 'id_gest', righe => {
+    const d = righe.map(r => r.data).sort(), st = {};
+    righe.forEach(r => st[r.stato] = (st[r.stato] || 0) + 1);
+    return `Dal ${d[0]} al ${d[d.length - 1]}. Stati: ${Object.entries(st).map(([k, n]) => `${k} ${n}`).join(', ')}.`;
+  });
+  collega('f-pagamenti', 'go-pagamenti', 'log-pagamenti', 'bar-pagamenti', pagamentiDaSql, 'gest_pagamenti_fatt', 'id_paga', righe => {
+    const d = righe.map(r => r.data_pagamento).filter(Boolean).sort(), tp = {};
+    righe.forEach(r => tp[r.tipo_registrazione] = (tp[r.tipo_registrazione] || 0) + 1);
+    return `Dal ${d[0]} al ${d[d.length - 1]}. Importo totale € ${it(righe.reduce((s, r) => s + r.importo, 0))}, spese € ${it(righe.reduce((s, r) => s + (r.costo_incasso || 0), 0))}. Tipi: ${Object.entries(tp).map(([k, n]) => `${k} ${n}`).join(', ')}.`;
+  });
+</script>
+</body>
+</html>
