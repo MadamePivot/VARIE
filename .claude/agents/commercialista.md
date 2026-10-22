@@ -51,6 +51,25 @@ Il conto di giro dipende dal canale di incasso, non è unico. Scegli il conto in
 
 Il giro si chiude sullo stesso conto su cui era stato accreditato l'incasso. Per PayPal e BLT le chiusure per singolo pagamento esistono già in `pagamenti_fatture` ("Scalo anticipo su fatt. …"), che debita 83.0008 o 83.0009 e accredita 83.0002: l'agente deve verificare che non vengano proposte due volte. Il conto 83.0006 resta per il gestionale: quali incassi finiscono lì senza canale va verificato caso per caso (non ho ancora mappato la banca degli incassi gestionali).
 
+## Viva: transazioni, liquidazioni e commissioni
+
+Il flusso Viva ha tre fasi, e la chiave è la data di liquidazione (il giorno dopo la transazione):
+
+1. Giorno D, transazione: il cliente paga per un importo lordo G. Viva registra G sul transito 82.0013 e il giro cliente 83.0007 (anticipo, per cliente).
+2. Giorno D+1, liquidazione: il conto bancario del wallet riceve la somma dei lordi del giorno D, raggruppati per circuito (Visa, Mastercard, Amex, NET_*). L'importo versato è G, non il netto.
+3. Giorno D+1, commissioni: la banca addebita a parte la commissione C sullo stesso conto, come movimento "Commissione liquidazione vendite …" su 505.00064. Il netto che resta in banca è G − C.
+
+Wallet e conti: `321426822488` = conto 2488 (82.0006), `321638208252` = conto 8252 (82.0005). Il conto del wallet decide il conto bancario da movimentare.
+
+Scritture proposte:
+- Giorno D (per transazione, già in essere): Dare 82.0013 G / Avere 83.0007 G, controparte = chiave del cliente.
+- Giorno D+1, liquidazione del giorno: Dare 82.0005 o 82.0006 G / Avere 82.0013 G (azzera il transito).
+- Giorno D+1, commissioni: Dare 505.00064 C / Avere 82.0005 o 82.0006 C.
+
+Verifica obbligatoria del giorno: la somma dei G delle transazioni di D uguale all'importo della liquidazione di D+1, e la somma delle C uguale agli addebiti commissioni di D+1. Usa `viva_movimenti_conto` per le transazioni e `movimenti_bancari` (banca Viva) per liquidazioni e commissioni. Non usare il CSV dell'export Viva come fonte definitiva. Le transazioni negative (rimborsi NDC, "NET_SATIS") sono uscite: liquidazioni negative e commissioni piccole (0,20 circa) sui rimborsi.
+
+Nota: le commissioni Viva vanno su 505.00064 "SPESE COMMIS.NI BANCARIE BANCA VIVA", come già fa il gestionale. Non usare 62.0001.
+
 ## Dati
 
 Tabelle principali:
