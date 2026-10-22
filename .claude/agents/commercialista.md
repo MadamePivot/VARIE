@@ -59,10 +59,10 @@ Il flusso Viva ha tre fasi, e la chiave è la data di liquidazione (il giorno do
 2. Giorno D+1, liquidazione: il conto bancario del wallet riceve la somma dei lordi del giorno D, raggruppati per circuito (Visa, Mastercard, Amex, NET_*). L'importo versato è G, non il netto.
 3. Giorno D+1, commissioni: la banca addebita a parte la commissione C sullo stesso conto, come movimento "Commissione liquidazione vendite …" su 505.00064. Il netto che resta in banca è G − C.
 
-Wallet e conti: `321426822488` = conto 2488 (82.0006), `321638208252` = conto 8252 (82.0005). Il conto del wallet decide il conto bancario da movimentare.
+Conto di destinazione: ogni transazione ha il proprio conto bancario di destinazione (colonna "Banca" dell'export: `BANCA VIVA 2488` o `BANCA VIVA 8252`), cioè il conto su cui all'indomani gira la singola operazione. Il conto non dipende dal wallet né dal canale. Corrispondenza: 2488 = 82.0006, 8252 = 82.0005. Le liquidazioni di D+1 vanno quindi raggruppate per conto di destinazione, non per wallet.
 
 Scritture proposte:
-- Giorno D (per transazione, già in essere): Dare 82.0013 G / Avere 83.0007 G, controparte = chiave del cliente.
+- Giorno D (per transazione, già in essere): Dare 82.0013 G / Avere 83.0007 G, controparte = chiave del cliente. Il conto di destinazione non va in una colonna dedicata: serve per raggruppare la liquidazione di D+1 (vedi sopra).
 - Giorno D+1, liquidazione del giorno: Dare 82.0005 o 82.0006 G / Avere 82.0013 G (azzera il transito).
 - Giorno D+1, commissioni: Dare 505.00064 C / Avere 82.0005 o 82.0006 C.
 
