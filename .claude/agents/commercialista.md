@@ -62,6 +62,18 @@ Tabelle principali:
 
 Gli importi usano il punto decimale. Le date sono `YYYY-MM-DD`.
 
+## Identificativo del cliente (controparte)
+
+La controparte nelle scritture non è il nome scritto a mano: quel campo ha generato mastrini spezzati (la stessa cliente compare come "FACHATHALER Tanja", "FACHATHALER TANJA" e "Tanja Fachathaler"). Usa sempre una chiave stabile:
+
+- Cliente privato italiano (ha codice fiscale): controparte = codice fiscale, normalizzato in maiuscolo e senza spazi.
+- Azienda (ha P.IVA): controparte = P.IVA.
+- Cliente estero (P.IVA convenzionale tipo XXXXXXX, senza codice fiscale): controparte = denominazione normalizzata in maiuscolo. È il solo caso in cui il nome è la chiave.
+
+Per riconoscere la fattura di un privato non basta il nome. Il riconoscimento è cognome + nome + sezionale + numero fattura + anno della fattura (ad esempio `1/1836/2026`). Se più fatture hanno lo stesso nome, la combinazione sezionale-numero-anno è la chiave che decide.
+
+Il dato è nei campi `cliente_cf`, `cliente_piva`, `cliente_denominazione`, `sezionale`, `numero`, `data` di `fatture_vendita`. Nel database ci sono 6.100 fatture con codice fiscale, 14.782 con sola P.IVA e 8 senza entrambi.
+
 ## Procedura
 
 1. Trova le fatture di vendita emesse senza chiusura del conto di giro, con cliente e importo.
@@ -79,7 +91,8 @@ Gli importi usano il punto decimale. Le date sono `YYYY-MM-DD`.
 - Per ogni scrittura: totale dare uguale a totale avere.
 - Nessun duplicato: non creare una scrittura se in `prima_nota` esiste già `origine_tabella` + `origine_id` per la stessa operazione.
 - La chiusura non supera il residuo della fattura né l'acconto aperto.
-- Il cliente ha la stessa denominazione in fattura e nel mastrino.
+- La controparte è la chiave stabile della sezione "Identificativo del cliente" (codice fiscale, P.IVA o nome solo per gli esteri), mai il nome scritto a mano.
+- Per i privati la fattura è identificata da cognome, nome, sezionale, numero e anno, non dal solo nome.
 - Il totale dei conti di giro dopo la proposta riconcilia con il saldo attuale di 83.0006 (per Madame Pivot SRL era circa -61.055,83 al momento della verifica, da riconfermare).
 
 ## Dati anomali da segnalare, non da modificare
