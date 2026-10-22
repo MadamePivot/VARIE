@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fatture da incassare · Madame Pivot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F6F3EE; --card:#FFFFFF; --soft:#F1ECE4; --line:#E6E0D5;
+    --ink:#1F2421; --ink-2:#646B66; --ink-3:#9AA09B;
+    --accent:#2F6F5E; --accent-2:#245446; --accent-bg:#E4EFEA;
+    --danger:#A8453A; --danger-bg:#F6E4E1; --warn:#B07A1C; --warn-bg:#F8EDD5;
+    --shadow:0 1px 2px rgba(31,36,33,.04), 0 4px 16px rgba(31,36,33,.05);
+    --r:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:'Inter',system-ui,sans-serif;font-size:14px;line-height:1.45;min-height:100vh;-webkit-font-smoothing:antialiased}
+  .mono{font-family:'IBM Plex Mono',monospace}
+  button{font-family:inherit;cursor:pointer}
+  input,select{font-family:inherit;font-size:14px;color:var(--ink)}
+  .hidden{display:none!important}
+
+  /* login */
+  #login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+  .login-card{background:var(--card);border-radius:20px;padding:44px 38px;width:100%;max-width:390px;box-shadow:var(--shadow)}
+  .eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:600}
+  h1{font-family:'Fraunces',serif;font-weight:600;letter-spacing:-.01em;margin:6px 0 0}
+  .login-card h1{font-size:28px;margin-bottom:26px}
+  .field{margin-bottom:16px}
+  .field label{display:block;font-size:12px;font-weight:600;color:var(--ink-2);margin-bottom:6px}
+  .input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#FCFBF9}
+  .input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-bg)}
+  .btn{border:none;border-radius:10px;padding:10px 16px;font-weight:600;font-size:14px;background:var(--accent);color:#fff}
+  .btn:hover{background:var(--accent-2)}
+  .btn.ghost{background:transparent;color:var(--ink-2);border:1px solid var(--line)}
+  .btn.ghost:hover{background:var(--soft)}
+  .err{color:var(--danger);font-size:13px;margin-top:10px;min-height:18px}
+
+  /* app */
+  header.top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:20px 28px 8px;flex-wrap:wrap}
+  header.top h1{font-size:26px}
+  main{padding:8px 28px 48px;max-width:1200px;margin:0 auto}
+  .card{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);padding:18px 20px;margin-bottom:16px}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:16px}
+  .kpi{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);padding:14px 18px}
+  .kpi .l{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2);font-weight:600}
+  .kpi .v{font-family:'Fraunces',serif;font-size:26px;font-weight:600;margin-top:2px}
+  .kpi .v.red{color:var(--danger)}
+  .filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;align-items:end}
+  .filters label{display:block;font-size:12px;font-weight:600;color:var(--ink-2);margin-bottom:5px}
+  .check{display:flex;align-items:center;gap:8px;font-size:13px;padding:10px 0}
+  .hint{font-size:12px;color:var(--ink-2);margin-top:10px}
+  table{width:100%;border-collapse:collapse}
+  th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2);text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer;user-select:none;white-space:nowrap}
+  th.num,td.num{text-align:right}
+  td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  tr.cliente{cursor:pointer}
+  tr.cliente:hover td{background:#FBF9F5}
+  tr.dettaglio td{background:var(--soft);padding:6px 10px 12px 28px}
+  tr.dettaglio table td,tr.dettaglio table th{border-bottom:1px solid var(--line);padding:6px 8px}
+  .pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600}
+  .pill.ok{background:var(--accent-bg);color:var(--accent-2)}
+  .pill.warn{background:var(--warn-bg);color:var(--warn)}
+  .pill.bad{background:var(--danger-bg);color:var(--danger)}
+  .muted{color:var(--ink-2)}
+  .scroll{overflow-x:auto}
+  #status{font-size:13px;color:var(--ink-2);margin:6px 0 14px}
+  @media(max-width:640px){header.top,main{padding-left:14px;padding-right:14px}}
+</style>
+</head>
+<body>
+
+<section id="login-screen" class="hidden">
+  <form class="login-card" id="login-form">
+    <div class="eyebrow">Madame Pivot</div>
+    <h1>Accedi</h1>
+    <div class="field"><label for="email">Email</label><input class="input" id="email" type="email" autocomplete="username" required></div>
+    <div class="field"><label for="password">Password</label><input class="input" id="password" type="password" autocomplete="current-password" required></div>
+    <button class="btn" type="submit" style="width:100%">Entra</button>
+    <div class="err" id="login-err"></div>
+  </form>
+</section>
+
+<div id="app" class="hidden">
+  <header class="top">
+    <div>
+      <div class="eyebrow">Madame Pivot</div>
+      <h1>Fatture da incassare</h1>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn ghost" id="reload-btn">Ricarica dati</button>
+      <button class="btn ghost" id="logout-btn">Esci</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="status">Caricamento…</div>
+
+    <div class="kpis">
+      <div class="kpi"><div class="l">Da incassare</div><div class="v red" id="k-tot">–</div></div>
+      <div class="kpi"><div class="l">Clienti con saldo aperto</div><div class="v" id="k-clienti">–</div></div>
+      <div class="kpi"><div class="l">Fatture aperte</div><div class="v" id="k-fatture">–</div></div>
+      <div class="kpi"><div class="l">Scaduto oltre i giorni scelti</div><div class="v red" id="k-scaduto">–</div></div>
+    </div>
+
+    <div class="card">
+      <div class="filters">
+        <div><label for="f-da">Fatture dal</label><input class="input" id="f-da" type="date" value="2025-01-01"></div>
+        <div><label for="f-azienda">Azienda</label><select class="input" id="f-azienda"><option value="">Tutte</option></select></div>
+        <div><label for="f-cerca">Cerca cliente</label><input class="input" id="f-cerca" type="search" placeholder="Nome o P.IVA"></div>
+        <div><label for="f-min">Residuo minimo (€)</label><input class="input" id="f-min" type="number" step="0.01" value="1"></div>
+        <div><label for="f-giorni">Scadenza dopo (giorni)</label><input class="input" id="f-giorni" type="number" min="0" value="30"></div>
+        <div><label for="f-ritardo">Mostra solo scaduto da oltre</label>
+          <select class="input" id="f-ritardo">
+            <option value="-9999">Tutto</option><option value="0">Scaduto</option>
+            <option value="30">30 giorni</option><option value="60">60 giorni</option><option value="90">90 giorni</option>
+          </select></div>
+        <div><label for="f-metodo">Incassi collegati</label>
+          <select class="input" id="f-metodo">
+            <option value="max">Il maggiore tra le due fonti</option>
+            <option value="somma">Somma delle due fonti</option>
+            <option value="banca">Solo pagamenti collegati a banca/carta</option>
+            <option value="gest">Solo incassi del gestionale</option>
+          </select></div>
+      </div>
+      <label class="check"><input type="checkbox" id="f-riv"> Solo rivenditori (tabella “rivenditori”)</label>
+      <label class="check" style="padding-top:0"><input type="checkbox" id="f-nc"> Sottrai le note di credito del cliente dal saldo</label>
+      <div class="hint">Il perimetro è da mettere a punto: cambia i filtri e guarda come si muove il totale. Il residuo di una fattura è il suo importo meno gli incassi collegati; le fatture annullate da nota di credito sono escluse.</div>
+    </div>
+
+    <div class="card scroll">
+      <table id="tab">
+        <thead><tr>
+          <th data-k="nome">Cliente</th>
+          <th class="num" data-k="nf">Fatture</th>
+          <th class="num" data-k="residuo">Da incassare</th>
+          <th class="num" data-k="nc">Note credito</th>
+          <th data-k="oldest">Più vecchia</th>
+          <th class="num" data-k="ritardo">Ritardo (gg)</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+
+<script type="module">
+  import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+  // stesso progetto e stessa chiave pubblica dell'Archivio Programmi: i dati sono protetti dal login (RLS)
+  const SUPABASE_URL = 'https://qwexiqicubanmodaebua.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF3ZXhpcWljdWJhbm1vZGFlYnVhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NTk4MjUsImV4cCI6MjA5OTUzNTgyNX0.Z24OBYkn5SDO41IbfJYljO7yua6d_FNB4_rj5agnDPs';
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  const $ = id => document.getElementById(id);
+  const eur = n => (Number(n) || 0).toLocaleString('it-IT', { style: 'currency', currency: 'EUR' });
+  const fmtDate = s => s ? s.split('-').reverse().join('/') : '';
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const norm = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+  let DATI = null;          // { fatture, pf, ig, riv }
+  let sortKey = 'residuo', sortDir = -1;
+  const aperti = new Set();
+
+  // ---------- login ----------
+  function showLogin() { $('app').classList.add('hidden'); $('login-screen').classList.remove('hidden'); }
+  function showApp() { $('login-screen').classList.add('hidden'); $('app').classList.remove('hidden'); if (!DATI) carica(); }
+  supabase.auth.getSession().then(({ data }) => data.session ? showApp() : showLogin());
+  supabase.auth.onAuthStateChange((_e, s) => { if (!s) { DATI = null; showLogin(); } });
+  $('login-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    $('login-err').textContent = '';
+    const { error } = await supabase.auth.signInWithPassword({ email: $('email').value, password: $('password').value });
+    if (error) $('login-err').textContent = 'Accesso non riuscito: ' + error.message;
+    else showApp();
+  });
+  $('logout-btn').addEventListener('click', () => supabase.auth.signOut());
+  $('reload-btn').addEventListener('click', () => { DATI = null; carica(); });
+
+  // ---------- caricamento (a pagine da 1000 righe, limite di Supabase) ----------
+  async function tutte(costruisci) {
+    const out = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await costruisci().range(from, from + 999);
+      if (error) throw error;
+      out.push(...data);
+      if (data.length < 1000) break;
+    }
+    return out;
+  }
+
+  async function carica() {
+    $('status').textContent = 'Caricamento dati da Supabase…';
+    try {
+      const da = $('f-da').value || '2021-01-01';
+      const fatture = await tutte(() => supabase.from('fatture_vendita')
+        .select('id,numero,sezionale,data,tipo_documento,importo_totale,cliente_denominazione,cliente_piva,cliente_id,azienda,annullata_ndc')
+        .gte('data', da).order('data').order('id'));
+      const pf = await tutte(() => supabase.from('pagamenti_fatture')
+        .select('fattura_id,importo_allocato').eq('fattura_tipo', 'vendita').order('id'));
+      const ig = await tutte(() => supabase.from('incassi_gestionale')
+        .select('fattura_vendita_id,importo').in('tipo_registrazione', ['FATT', 'FATT-NDC']).not('fattura_vendita_id', 'is', null).order('idpaga'));
+      const riv = await tutte(() => supabase.from('rivenditori').select('nome,alias,attivo').order('id'));
+      DATI = { fatture, pf, ig, riv, da };
+      const aziende = [...new Set(fatture.map(f => f.azienda).filter(Boolean))].sort();
+      $('f-azienda').innerHTML = '<option value="">Tutte</option>' + aziende.map(a => `<option>${esc(a)}</option>`).join('');
+      render();
+    } catch (e) {
+      $('status').textContent = 'Errore nel caricamento: ' + (e.message || e);
+    }
+  }
+
+  // ---------- calcolo ----------
+  function calcola() {
+    const { fatture, pf, ig, riv } = DATI;
+    const metodo = $('f-metodo').value;
+    const giorni = Number($('f-giorni').value) || 0;
+    const minRes = Number($('f-min').value) || 0;
+    const azienda = $('f-azienda').value;
+    const cerca = norm($('f-cerca').value);
+    const soloRiv = $('f-riv').checked;
+    const sottraiNc = $('f-nc').checked;
+    const minRitardo = Number($('f-ritardo').value);
+    const oggi = new Date(); oggi.setHours(0, 0, 0, 0);
+
+    const sumPf = new Map(), sumIg = new Map();
+    pf.forEach(p => sumPf.set(p.fattura_id, (sumPf.get(p.fattura_id) || 0) + Number(p.importo_allocato || 0)));
+    ig.forEach(p => sumIg.set(p.fattura_vendita_id, (sumIg.get(p.fattura_vendita_id) || 0) + Number(p.importo || 0)));
+
+    const nomiRiv = new Set();
+    riv.filter(r => r.attivo !== false).forEach(r => { nomiRiv.add(norm(r.nome)); (r.alias || []).forEach(a => nomiRiv.add(norm(a))); });
+
+    const clienti = new Map();
+    const chiave = f => f.cliente_piva || f.cliente_id || norm(f.cliente_denominazione);
+    const get = f => {
+      const k = chiave(f);
+      if (!clienti.has(k)) clienti.set(k, { k, nome: f.cliente_denominazione || '(senza nome)', piva: f.cliente_piva || '', righe: [], nc: 0 });
+      return clienti.get(k);
+    };
+
+    for (const f of fatture) {
+      if (azienda && f.azienda !== azienda) continue;
+      if (soloRiv && !nomiRiv.has(norm(f.cliente_denominazione))) continue;
+      if (cerca && !norm(f.cliente_denominazione).includes(cerca) && !norm(f.cliente_piva).includes(cerca)) continue;
+      const tot = Number(f.importo_totale) || 0;
+      if (f.tipo_documento === 'TD04') { get(f).nc += tot; continue; }
+      if (f.annullata_ndc) continue;
+      const a = sumPf.get(f.id) || 0, b = sumIg.get(f.id) || 0;
+      const pagato = metodo === 'somma' ? a + b : metodo === 'banca' ? a : metodo === 'gest' ? b : Math.max(a, b);
+      const residuo = tot - pagato;
+      if (residuo < minRes) continue;
+      const scad = new Date(f.data + 'T00:00:00'); scad.setDate(scad.getDate() + giorni);
+      const ritardo = Math.floor((oggi - scad) / 86400000);
+      if (ritardo < minRitardo) continue;
+      get(f).righe.push({ ...f, tot, pagato, residuo, ritardo });
+    }
+
+    const out = [];
+    for (const c of clienti.values()) {
+      if (!c.righe.length) continue;
+      const lordo = c.righe.reduce((s, r) => s + r.residuo, 0);
+      const residuo = sottraiNc ? Math.max(0, lordo - c.nc) : lordo;
+      if (residuo < minRes) continue;
+      c.nf = c.righe.length; c.residuo = residuo;
+      c.oldest = c.righe.reduce((m, r) => r.data < m ? r.data : m, c.righe[0].data);
+      c.ritardo = Math.max(...c.righe.map(r => r.ritardo));
+      out.push(c);
+    }
+    return out;
+  }
+
+  // ---------- disegno ----------
+  function pillRitardo(g) {
+    if (g <= 0) return `<span class="pill ok">nei termini</span>`;
+    return `<span class="pill ${g > 60 ? 'bad' : 'warn'}">${g} gg</span>`;
+  }
+
+  function render() {
+    if (!DATI) return;
+    const lista = calcola();
+    lista.sort((a, b) => {
+      const x = a[sortKey], y = b[sortKey];
+      return (typeof x === 'string' ? x.localeCompare(y) : x - y) * sortDir;
+    });
+
+    const tot = lista.reduce((s, c) => s + c.residuo, 0);
+    const nF = lista.reduce((s, c) => s + c.nf, 0);
+    const giorniMin = Number($('f-ritardo').value);
+    const scaduto = lista.reduce((s, c) => s + c.righe.filter(r => r.ritardo > 0).reduce((t, r) => t + r.residuo, 0), 0);
+    $('k-tot').textContent = eur(tot);
+    $('k-clienti').textContent = lista.length.toLocaleString('it-IT');
+    $('k-fatture').textContent = nF.toLocaleString('it-IT');
+    $('k-scaduto').textContent = eur(scaduto);
+    $('status').textContent = `${DATI.fatture.length.toLocaleString('it-IT')} fatture lette dal ${fmtDate(DATI.da)}. Clicca un cliente per vedere le fatture.`;
+
+    $('tbody').innerHTML = lista.map(c => {
+      const open = aperti.has(c.k);
+      let h = `<tr class="cliente" data-k="${esc(c.k)}">
+        <td><b>${esc(c.nome)}</b><div class="muted mono" style="font-size:11px">${esc(c.piva)}</div></td>
+        <td class="num">${c.nf}</td>
+        <td class="num"><b>${eur(c.residuo)}</b></td>
+        <td class="num muted">${c.nc ? eur(c.nc) : ''}</td>
+        <td>${fmtDate(c.oldest)}</td>
+        <td class="num">${pillRitardo(c.ritardo)}</td></tr>`;
+      if (open) {
+        const righe = [...c.righe].sort((a, b) => a.data.localeCompare(b.data));
+        h += `<tr class="dettaglio"><td colspan="6"><table><thead><tr>
+          <th>Fattura</th><th>Data</th><th class="num">Importo</th><th class="num">Incassato</th><th class="num">Residuo</th><th class="num">Ritardo</th></tr></thead><tbody>` +
+          righe.map(r => `<tr><td>${esc(r.sezionale || '')} ${esc(r.numero)}</td><td>${fmtDate(r.data)}</td>
+            <td class="num">${eur(r.tot)}</td><td class="num">${eur(r.pagato)}</td><td class="num"><b>${eur(r.residuo)}</b></td>
+            <td class="num">${pillRitardo(r.ritardo)}</td></tr>`).join('') +
+          `</tbody></table></td></tr>`;
+      }
+      return h;
+    }).join('') || `<tr><td colspan="6" class="muted" style="padding:24px">Nessun cliente con saldo aperto con questi filtri.</td></tr>`;
+  }
+
+  $('tbody').addEventListener('click', e => {
+    const tr = e.target.closest('tr.cliente'); if (!tr) return;
+    const k = tr.dataset.k;
+    aperti.has(k) ? aperti.delete(k) : aperti.add(k);
+    render();
+  });
+  document.querySelectorAll('th[data-k]').forEach(th => th.addEventListener('click', () => {
+    const k = th.dataset.k;
+    if (sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = k === 'nome' ? 1 : -1; }
+    render();
+  }));
+  ['f-azienda', 'f-cerca', 'f-min', 'f-giorni', 'f-ritardo', 'f-metodo', 'f-riv', 'f-nc']
+    .forEach(id => $(id).addEventListener('input', render));
+  // la data iniziale cambia quanto si scarica: ricarico i dati
+  $('f-da').addEventListener('change', () => { DATI = null; carica(); });
+</script>
+</body>
+</html>
