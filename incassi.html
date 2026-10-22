@@ -68,6 +68,22 @@
   .muted{color:var(--ink-2)}
   .scroll{overflow-x:auto}
   #status{font-size:13px;color:var(--ink-2);margin:6px 0 14px}
+  .mini{border:1px solid var(--line);background:#fff;border-radius:8px;padding:3px 9px;font-size:12px;font-weight:600;color:var(--ink-2);margin-left:6px}
+  .mini:hover{background:var(--soft)}
+  .mini.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+  .mini.pri:hover{background:var(--accent-2)}
+  #modal{position:fixed;inset:0;background:rgba(31,36,33,.45);display:flex;align-items:flex-start;justify-content:center;padding:24px 12px;overflow:auto;z-index:50}
+  #modal .box{background:var(--card);border-radius:var(--r);box-shadow:0 10px 40px rgba(0,0,0,.25);width:100%;max-width:980px;padding:20px 22px}
+  #modal h2{font-family:'Fraunces',serif;font-size:21px;margin:0 0 4px}
+  #modal h3{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2);margin:18px 0 8px}
+  .mrow{display:flex;gap:10px;align-items:center;padding:7px 8px;border-bottom:1px solid var(--line);cursor:pointer}
+  .mrow:hover{background:#FBF9F5}
+  .mrow.sel{background:var(--accent-bg)}
+  .mrow .d{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .amt{width:110px;text-align:right;padding:5px 8px}
+  .srch{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:end}
+  .srch label{display:block;font-size:12px;font-weight:600;color:var(--ink-2);margin-bottom:4px}
+  #m-msg{font-size:13px;margin-top:12px;min-height:18px}
   @media(max-width:640px){header.top,main{padding-left:14px;padding-right:14px}}
 </style>
 </head>
@@ -147,6 +163,8 @@
   </main>
 </div>
 
+<div id="modal" class="hidden"><div class="box" id="modal-box"></div></div>
+
 <script type="module">
   import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -161,6 +179,7 @@
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const norm = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
+  let ULTIMA = [];
   let DATI = null;          // { fatture, pf, ig, riv }
   let sortKey = 'residuo', sortDir = -1;
   const aperti = new Set();
@@ -284,6 +303,7 @@
   function render() {
     if (!DATI) return;
     const lista = calcola();
+    ULTIMA = lista;
     lista.sort((a, b) => {
       const x = a[sortKey], y = b[sortKey];
       return (typeof x === 'string' ? x.localeCompare(y) : x - y) * sortDir;
@@ -302,7 +322,10 @@
     $('tbody').innerHTML = lista.map(c => {
       const open = aperti.has(c.k);
       let h = `<tr class="cliente" data-k="${esc(c.k)}">
-        <td><b>${esc(c.nome)}</b><div class="muted mono" style="font-size:11px">${esc(c.piva)}</div></td>
+        <td><b>${esc(c.nome)}</b>
+          <button class="mini" data-apri="${esc(c.k)}">${open ? 'Nascondi fatture' : 'Fatture aperte'}</button>
+          <button class="mini pri" data-assoc="${esc(c.k)}">Associa</button>
+          <div class="muted mono" style="font-size:11px">${esc(c.piva)}</div></td>
         <td class="num">${c.nf}</td>
         <td class="num"><b>${eur(c.residuo)}</b></td>
         <td class="num muted">${c.nc ? eur(c.nc) : ''}</td>
@@ -311,10 +334,11 @@
       if (open) {
         const righe = [...c.righe].sort((a, b) => a.data.localeCompare(b.data));
         h += `<tr class="dettaglio"><td colspan="6"><table><thead><tr>
-          <th>Fattura</th><th>Data</th><th class="num">Importo</th><th class="num">Incassato</th><th class="num">Residuo</th><th class="num">Ritardo</th></tr></thead><tbody>` +
+          <th>Fattura</th><th>Data</th><th class="num">Importo</th><th class="num">Incassato</th><th class="num">Residuo</th><th class="num">Ritardo</th><th></th></tr></thead><tbody>` +
           righe.map(r => `<tr><td>${esc(r.sezionale || '')} ${esc(r.numero)}</td><td>${fmtDate(r.data)}</td>
             <td class="num">${eur(r.tot)}</td><td class="num">${eur(r.pagato)}</td><td class="num"><b>${eur(r.residuo)}</b></td>
-            <td class="num">${pillRitardo(r.ritardo)}</td></tr>`).join('') +
+            <td class="num">${pillRitardo(r.ritardo)}</td>
+            <td class="num"><button class="mini pri" data-assoc="${esc(c.k)}" data-fatt="${r.id}">Associa</button></td></tr>`).join('') +
           `</tbody></table></td></tr>`;
       }
       return h;
@@ -322,11 +346,190 @@
   }
 
   $('tbody').addEventListener('click', e => {
+    const bAs = e.target.closest('button[data-assoc]');
+    if (bAs) { e.stopPropagation(); apriAssocia(bAs.dataset.assoc, bAs.dataset.fatt || null); return; }
     const tr = e.target.closest('tr.cliente'); if (!tr) return;
     const k = tr.dataset.k;
     aperti.has(k) ? aperti.delete(k) : aperti.add(k);
     render();
   });
+  // ---------- Associa: collega un incasso bancario a fatture del cliente (come "Collega pagamento" del gestionale) ----------
+  const r2 = n => Math.round((Number(n) || 0) * 100) / 100;
+  const ANTICIPI = ['83.0007', '83.0008', '83.0009'];   // c/anticipi Viva, PayPal, conto 5293
+  const ETICHETTA_SCR = {
+    anticipo: ['ok', 'scalo anticipo automatico'],
+    diretta: ['ok', 'già su Crediti clienti'],
+    nessuna: ['bad', 'movimento senza scrittura'],
+    altro: ['warn', 'scrittura da controllare'],
+  };
+  let AS = null;   // stato della finestra aperta
+
+  function chiudiModale() { $('modal').classList.add('hidden'); AS = null; }
+
+  function apriAssocia(k, fattId) {
+    const c = ULTIMA.find(x => x.k === k); if (!c) return;
+    const righe = [...c.righe].sort((a, b) => a.data.localeCompare(b.data));
+    const parola = c.nome.split(/\s+/).find(w => w.replace(/[^A-Za-z0-9]/g, '').length >= 4) || '';
+    AS = { c, righe, sel: new Set(fattId ? [fattId] : righe.map(r => r.id)), importi: {}, mov: null, movs: [] };
+    $('modal').classList.remove('hidden');
+    $('modal-box').innerHTML = `
+      <div style="display:flex;justify-content:space-between;gap:10px">
+        <div><div class="eyebrow">Associa incasso</div><h2>${esc(c.nome)}</h2></div>
+        <button class="mini" id="m-close">Chiudi</button></div>
+      <h3>1. Fatture da saldare</h3><div id="m-fatt"></div>
+      <h3>2. Movimento bancario incassato</h3>
+      <div class="srch">
+        <div><label>Testo nella descrizione</label><input class="input" id="m-txt" value="${esc(parola)}"></div>
+        <div><label>Importo circa (€)</label><input class="input" id="m-imp" type="number" step="0.01" placeholder="facoltativo"></div>
+        <div><label>Dal</label><input class="input" id="m-dal" type="date" value="${esc(righe[0].data)}"></div>
+        <div><button class="btn" id="m-cerca" style="width:100%">Cerca movimenti</button></div>
+      </div>
+      <div id="m-movs" class="hint">Premi “Cerca movimenti”. Compaiono solo entrate non ancora riconciliate per intero.</div>
+      <h3>3. Importi da assegnare</h3><div id="m-ass" class="hint">Scegli prima fatture e movimento.</div>
+      <div id="m-msg"></div>`;
+    $('m-close').onclick = chiudiModale;
+    $('m-cerca').onclick = cercaMovimenti;
+    ridisegnaFatture(); cercaMovimenti();
+  }
+
+  function ridisegnaFatture() {
+    $('m-fatt').innerHTML = AS.righe.map(r => `<label class="mrow">
+      <input type="checkbox" data-f="${r.id}" ${AS.sel.has(r.id) ? 'checked' : ''}>
+      <span class="d">${esc(r.sezionale || '')} ${esc(r.numero)} · ${fmtDate(r.data)}</span>
+      <span class="mono">${eur(r.residuo)}</span></label>`).join('');
+    $('m-fatt').querySelectorAll('input').forEach(i => i.addEventListener('change', () => {
+      i.checked ? AS.sel.add(i.dataset.f) : AS.sel.delete(i.dataset.f);
+      ripartisci(); ridisegnaAssegnazione();
+    }));
+  }
+
+  async function cercaMovimenti() {
+    $('m-movs').textContent = 'Ricerca…';
+    try {
+      let q = supabase.from('movimenti_bancari')
+        .select('id,data_operazione,descrizione,avere,lordo,banca,riconciliato')
+        .gt('avere', 0).eq('riconciliato', false).order('data_operazione', { ascending: false }).limit(60);
+      const dal = $('m-dal').value; if (dal) q = q.gte('data_operazione', dal);
+      const txt = $('m-txt').value.trim().replace(/[%,()]/g, ' '); if (txt) q = q.ilike('descrizione', '%' + txt + '%');
+      const imp = Number($('m-imp').value);
+      if (imp > 0) q = q.gte('avere', imp * 0.9).lte('avere', imp * 1.1);
+      const { data, error } = await q; if (error) throw error;
+      let giaAll = new Map();
+      if (data.length) {
+        const { data: links, error: e2 } = await supabase.from('pagamenti_fatture').select('movimento_id,importo_allocato')
+          .eq('movimento_tabella', 'movimenti_bancari').in('movimento_id', data.map(m => m.id));
+        if (e2) throw e2;
+        links.forEach(l => giaAll.set(l.movimento_id, (giaAll.get(l.movimento_id) || 0) + Number(l.importo_allocato || 0)));
+      }
+      // come il gestionale: con il lordo (PayPal) il movimento e' coperto al lordo, non al netto accreditato
+      // scritture gia' presenti sul movimento: dicono se il collegamento generera' da solo lo scalo anticipo
+      const scr = new Map();
+      if (data.length) {
+        const { data: pn, error: e3 } = await supabase.from('prima_nota')
+          .select('origine_id,prima_nota_righe(conto,dare,avere)').eq('origine_tabella', 'movimenti_bancari').in('origine_id', data.map(m => m.id));
+        if (e3) throw e3;
+        for (const p of pn) {
+          const av = p.prima_nota_righe.filter(r => Number(r.avere) > 0).map(r => r.conto);
+          const st = av.find(c => ANTICIPI.includes(c)) ? 'anticipo' : av.includes('83.0002') ? 'diretta' : 'altro';
+          if (!scr.has(p.origine_id) || st === 'anticipo') scr.set(p.origine_id, st);
+        }
+      }
+      AS.movs = data.map(m => {
+        const tot = Number(m.lordo) > 0 && Number(m.avere) > 0 ? Math.abs(Number(m.lordo)) : Number(m.avere);
+        return { ...m, scr: scr.get(m.id) || 'nessuna', tot, gia: giaAll.get(m.id) || 0, residuo: r2(tot - (giaAll.get(m.id) || 0)) };
+      }).filter(m => m.residuo > 0.02);
+      $('m-movs').className = '';
+      $('m-movs').innerHTML = AS.movs.length ? AS.movs.map(m => `<div class="mrow ${AS.mov === m.id ? 'sel' : ''}" data-m="${m.id}">
+        <span class="mono">${fmtDate(m.data_operazione)}</span>
+        <span class="d" title="${esc(m.descrizione)}">${esc(m.descrizione)}</span>
+        <span class="muted" style="font-size:12px">${esc(m.banca || '')}</span>
+        <span class="pill ${ETICHETTA_SCR[m.scr][0]}">${ETICHETTA_SCR[m.scr][1]}</span>
+        <b class="mono">${eur(m.residuo)}</b></div>`).join('') : '<div class="hint">Nessun movimento trovato: allarga la data o cambia testo/importo.</div>';
+      $('m-movs').querySelectorAll('.mrow').forEach(el => el.addEventListener('click', () => {
+        AS.mov = el.dataset.m;
+        $('m-movs').querySelectorAll('.mrow').forEach(x => x.classList.toggle('sel', x === el));
+        ripartisci(); ridisegnaAssegnazione();
+      }));
+    } catch (e) { $('m-movs').textContent = 'Errore: ' + (e.message || e); }
+  }
+
+  // ripartizione automatica dal piu' vecchio: ogni importo resta modificabile a mano
+  function ripartisci() {
+    const m = AS.movs.find(x => x.id === AS.mov); AS.importi = {};
+    if (!m) return;
+    let resto = m.residuo;
+    for (const r of AS.righe.filter(r => AS.sel.has(r.id))) {
+      const a = r2(Math.min(r.residuo, Math.max(0, resto)));
+      AS.importi[r.id] = a; resto = r2(resto - a);
+    }
+  }
+
+  function ridisegnaAssegnazione() {
+    const m = AS.movs.find(x => x.id === AS.mov);
+    const scelte = AS.righe.filter(r => AS.sel.has(r.id));
+    if (!m || !scelte.length) { $('m-ass').className = 'hint'; $('m-ass').textContent = 'Scegli prima fatture e movimento.'; return; }
+    $('m-ass').className = '';
+    $('m-ass').innerHTML = scelte.map(r => `<div class="mrow" style="cursor:default">
+      <span class="d">${esc(r.sezionale || '')} ${esc(r.numero)} · residuo ${eur(r.residuo)}</span>
+      <input class="input amt" type="number" step="0.01" min="0" data-a="${r.id}" value="${AS.importi[r.id] ?? 0}"></div>`).join('') +
+      `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:12px;flex-wrap:wrap">
+        <div id="m-tot" class="muted"></div><button class="btn" id="m-ok">Associa</button></div>`;
+    $('m-ass').querySelectorAll('input').forEach(i => i.addEventListener('input', () => { AS.importi[i.dataset.a] = Number(i.value) || 0; totale(); }));
+    $('m-ok').onclick = conferma; totale();
+  }
+
+  function totale() {
+    const m = AS.movs.find(x => x.id === AS.mov); if (!m) return true;
+    const t = r2(Object.entries(AS.importi).filter(([id]) => AS.sel.has(id)).reduce((s, [, v]) => s + v, 0));
+    const ok = t > 0.004 && t <= m.residuo + 0.02;
+    $('m-tot').innerHTML = `Assegnato <b>${eur(t)}</b> su ${eur(m.residuo)} disponibili` + (ok ? '' : ' · <span style="color:var(--danger)">importo non valido</span>');
+    $('m-ok').disabled = !ok; return ok;
+  }
+
+  async function conferma() {
+    if (!totale()) return;
+    const m = AS.movs.find(x => x.id === AS.mov);
+    const voci = AS.righe.filter(r => AS.sel.has(r.id) && r2(AS.importi[r.id]) > 0.004);
+    for (const v of voci) if (r2(AS.importi[v.id]) > v.residuo + 0.02) { $('m-msg').textContent = `Su ${v.numero} l'importo supera il residuo.`; return; }
+    const testo = voci.map(v => `• ${v.sezionale || ''} ${v.numero}: € ${r2(AS.importi[v.id]).toFixed(2)}`).join('\n');
+    const avviso = {
+      anticipo: 'Scritture: il database genera in bozza lo scalo anticipo (Dare c/anticipi, Avere 83.0002 Crediti clienti) per ogni fattura.',
+      diretta: 'Scritture: il movimento è già registrato su 83.0002 Crediti clienti, nessuna scrittura da aggiungere.',
+      nessuna: 'ATTENZIONE: il movimento non ha ancora la sua scrittura in prima nota, quindi NON verrà generata alcuna scrittura. Va prima registrato dal gestionale.',
+      altro: 'ATTENZIONE: il movimento ha una scrittura diversa da anticipo o Crediti clienti: controllala in prima nota dopo il collegamento.',
+    }[m.scr];
+    if (!confirm(`Scrivo ${voci.length} collegament${voci.length === 1 ? 'o' : 'i'} nel gestionale:\n\nMovimento del ${fmtDate(m.data_operazione)} (${m.descrizione.slice(0, 50)})\n${testo}\n\n${avviso}\n\nContinuo?`)) return;
+    $('m-ok').disabled = true; $('m-msg').textContent = 'Scrittura in corso…';
+    const errs = [], idLink = [];
+    for (const v of voci) {
+      // stessa riga che scrive "Collega pagamento" nel gestionale; 23505 = collegamento gia' presente
+      const { data, error } = await supabase.from('pagamenti_fatture').insert({
+        movimento_tabella: 'movimenti_bancari', movimento_id: m.id, fattura_id: v.id, fattura_tipo: 'vendita', importo_allocato: r2(AS.importi[v.id]) }).select('id').single();
+      if (error && error.code !== '23505') errs.push(`${v.numero}: ${error.message}`);
+      else if (data) idLink.push(data.id);
+    }
+    try {
+      // il movimento risulta riconciliato quando le fatture collegate coprono tutto l'importo (stessa regola del gestionale)
+      const { data: links } = await supabase.from('pagamenti_fatture').select('importo_allocato').eq('movimento_tabella', 'movimenti_bancari').eq('movimento_id', m.id);
+      const tot = (links || []).reduce((s, l) => s + Number(l.importo_allocato || 0), 0);
+      if ((links || []).length) await supabase.from('movimenti_bancari').update({ riconciliato: tot >= m.tot - 0.02, codice_conto: null, nota_acconto: null }).eq('id', m.id);
+    } catch (e) { errs.push('Aggiornamento movimento: ' + (e.message || e)); }
+    if (errs.length) { $('m-msg').innerHTML = '<span style="color:var(--danger)">Errori: ' + esc(errs.join(' | ')) + '</span>'; $('m-ok').disabled = false; return; }
+    // verifica scritture: il trigger scrive la bozza con origine = id del collegamento
+    let scritte = 0;
+    try {
+      const { data: pn } = await supabase.from('prima_nota').select('id').eq('origine_tabella', 'pagamenti_fatture').in('origine_id', idLink);
+      scritte = (pn || []).length;
+    } catch (e) { /* la verifica non blocca: il collegamento e' gia' scritto */ }
+    const attese = m.scr === 'anticipo' ? idLink.length : 0;
+    const esito = attese === 0
+      ? (m.scr === 'diretta' ? 'Nessuna scrittura da aggiungere: il movimento era già su Crediti clienti.' : '⚠ Nessuna scrittura generata: controlla il movimento in prima nota.')
+      : scritte === attese ? `✓ ${scritte} scritture di scalo anticipo create in bozza (da confermare in prima nota).` : `⚠ Create ${scritte} scritture su ${attese} attese: controlla la prima nota.`;
+    $('m-ass').innerHTML = ''; $('m-fatt').innerHTML = ''; $('m-movs').innerHTML = '';
+    $('m-msg').innerHTML = `<b>${idLink.length} collegament${idLink.length === 1 ? 'o scritto' : 'i scritti'}.</b><br>${esc(esito)}<br><br><button class="btn" id="m-fine">Chiudi e aggiorna elenco</button>`;
+    $('m-fine').onclick = () => { chiudiModale(); DATI = null; carica(); };
+  }
+
   document.querySelectorAll('th[data-k]').forEach(th => th.addEventListener('click', () => {
     const k = th.dataset.k;
     if (sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = k === 'nome' ? 1 : -1; }
