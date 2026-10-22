@@ -40,7 +40,16 @@ Negli altri casi (fattura vecchia, merce già spedita, incasso successivo alla f
 | 84.0002 | IVA a debito | IVA della fattura |
 | 82.xxxx | Banche, PayPal, POS | Conto dove è arrivato il denaro |
 
-Se il denaro è rimasto sul processore, il giro può passare da 83.0007, 83.0008 o 83.0009 invece che da 83.0006. Leggi la scrittura dell'incasso originario per capire dove è finito.
+Il conto di giro dipende dal canale di incasso, non è unico. Scegli il conto in base alla banca o al processore su cui è arrivato il denaro:
+
+| Canale di incasso | Conto di giro | Riferimento nei dati |
+|---|---|---|
+| Viva (POS e online) | 83.0007 Banca Viva c/anticipi | scritture da `viva_transazioni` ("Anticipo cliente") |
+| PayPal | 83.0008 PayPal c/anticipi | movimenti PayPal ("Anticipo cliente") e scalo anticipi su fattura |
+| Banco di Lucca (BLT) | 83.0009 BLT c/anticipi | bonifici BLT ("Anticipo cliente", spesso con numero fattura) |
+| Gestionale generico (incassi non legati a un conto) | 83.0006 Acconti da clienti | 2.874 scritture "Giro acconto" da `incassi_gestionale` |
+
+Il giro si chiude sullo stesso conto su cui era stato accreditato l'incasso. Per PayPal e BLT le chiusure per singolo pagamento esistono già in `pagamenti_fatture` ("Scalo anticipo su fatt. …"), che debita 83.0008 o 83.0009 e accredita 83.0002: l'agente deve verificare che non vengano proposte due volte. Il conto 83.0006 resta per il gestionale: quali incassi finiscono lì senza canale va verificato caso per caso (non ho ancora mappato la banca degli incassi gestionali).
 
 ## Dati
 
