@@ -141,14 +141,20 @@
           </select></div>
         <div><label for="f-metodo">Incassi collegati</label>
           <select class="input" id="f-metodo">
-            <option value="max">Il maggiore tra le due fonti</option>
-            <option value="somma">Somma delle due fonti</option>
+            <option value="max">Il maggiore tra le fonti (consigliato)</option>
             <option value="banca">Solo pagamenti collegati a banca/carta</option>
             <option value="gest">Solo incassi del gestionale</option>
+          </select></div>
+        <div><label for="f-tipo">Tipo di cliente</label>
+          <select class="input" id="f-tipo">
+            <option value="b2b">Aziende e rivenditori</option>
+            <option value="b2b500">Aziende, rivenditori e privati/esteri da 500 € in su</option>
+            <option value="tutti">Tutti, anche privati ed e-commerce</option>
           </select></div>
       </div>
       <label class="check"><input type="checkbox" id="f-riv"> Solo rivenditori (tabella “rivenditori”)</label>
       <label class="check" style="padding-top:0"><input type="checkbox" id="f-nc"> Sottrai le note di credito del cliente dal saldo</label>
+      <div class="hint"><b>Privati ed e-commerce:</b> le fatture ai privati (P.IVA vuota o generica) sono di norma pagate all'ordine e spesso non hanno un incasso collegato: contarle gonfia il “da incassare”. Per questo di default sono escluse. Le fonti di incasso lette sono: pagamenti collegati ai movimenti bancari, incassi del gestionale 2026 e incassi giornalieri del gestionale dal 2021 (“gest_incassi_giorno”).</div>
       <div class="hint">Il perimetro è da mettere a punto: cambia i filtri e guarda come si muove il totale. Il residuo di una fattura è il suo importo meno gli incassi collegati; le fatture annullate da nota di credito sono escluse.</div>
     </div>
 
@@ -241,8 +247,11 @@
         .select('fattura_id,importo_allocato').eq('fattura_tipo', 'vendita').order('id'));
       const ig = await tutte(() => supabase.from('incassi_gestionale')
         .select('fattura_vendita_id,importo').in('tipo_registrazione', ['FATT', 'FATT-NDC']).not('fattura_vendita_id', 'is', null).order('idpaga'));
+      // incassi giornalieri del gestionale (2021-oggi): si collegano alla fattura dal riferimento "Fatt. sezionale/numero/anno"
+      const gg = await tutte(() => supabase.from('gest_incassi_giorno')
+        .select('riferimento,importo').in('tipo', ['FATT', 'FATT-NDC']).order('id_paga'));
       const riv = await tutte(() => supabase.from('rivenditori').select('nome,alias,attivo').order('id'));
-      DATI = { fatture, pf, ig, riv, da };
+      DATI = { fatture, pf, ig, gg, riv, da };
       const aziende = [...new Set(fatture.map(f => f.azienda).filter(Boolean))].sort();
       $('f-azienda').innerHTML = '<option value="">Tutte</option>' + aziende.map(a => `<option>${esc(a)}</option>`).join('');
       render();
@@ -252,9 +261,36 @@
   }
 
   // ---------- calcolo ----------
-  function calcola() {
-    const { fatture, pf, ig, riv } = DATI;
+  // XXXXXXX, DEXXXXXXX, FRXXXXXXX... sono codici convenzionali per le fatture estere, non identificano il cliente
+  const pivaGenerica = p => !p || /^[A-Z]{0,2}X{5,}$/i.test(String(p).trim());
+
+  // incassato per fattura, da tre fonti che si sovrappongono (stesso gestionale): si prende il maggiore, mai la somma
+  function costruisciPagato() {
+    const { pf, ig, gg } = DATI;
+    if (!DATI.mappe) {
+      const sPf = new Map(), sIg = new Map(), sGg = new Map();
+      pf.forEach(p => sPf.set(p.fattura_id, (sPf.get(p.fattura_id) || 0) + Number(p.importo_allocato || 0)));
+      ig.forEach(p => sIg.set(p.fattura_vendita_id, (sIg.get(p.fattura_vendita_id) || 0) + Number(p.importo || 0)));
+      gg.forEach(p => {
+        const m = /^Fatt\. (\d+)\/(\d+)\/(\d{4})/.exec(p.riferimento || ''); if (!m) return;
+        const k = m[1] + '/' + m[2] + '/' + m[3];
+        sGg.set(k, (sGg.get(k) || 0) + Number(p.importo || 0));
+      });
+      DATI.mappe = { sPf, sIg, sGg };
+    }
+    const { sPf, sIg, sGg } = DATI.mappe;
     const metodo = $('f-metodo').value;
+    return f => {
+      const a = sPf.get(f.id) || 0;
+      const b = Math.max(sIg.get(f.id) || 0, sGg.get((f.sezionale || '') + '/' + (f.numero || '') + '/' + String(f.data).slice(0, 4)) || 0);
+      return metodo === 'banca' ? a : metodo === 'gest' ? b : Math.max(a, b);
+    };
+  }
+
+  function calcola() {
+    const { fatture, riv } = DATI;
+    const pagatoDi = costruisciPagato();
+    const tipoCli = $('f-tipo').value;
     const giorni = Number($('f-giorni').value) || 0;
     const minRes = Number($('f-min').value) || 0;
     const azienda = $('f-azienda').value;
@@ -264,17 +300,12 @@
     const minRitardo = Number($('f-ritardo').value);
     const oggi = new Date(); oggi.setHours(0, 0, 0, 0);
 
-    const sumPf = new Map(), sumIg = new Map();
-    pf.forEach(p => sumPf.set(p.fattura_id, (sumPf.get(p.fattura_id) || 0) + Number(p.importo_allocato || 0)));
-    ig.forEach(p => sumIg.set(p.fattura_vendita_id, (sumIg.get(p.fattura_vendita_id) || 0) + Number(p.importo || 0)));
-
     const nomiRiv = new Set();
     riv.filter(r => r.attivo !== false).forEach(r => { nomiRiv.add(norm(r.nome)); (r.alias || []).forEach(a => nomiRiv.add(norm(a))); });
 
     const clienti = new Map();
     // XXXXXXX, DEXXXXXXX, FRXXXXXXX... sono codici convenzionali per le fatture estere, non identificano il cliente:
     // in quel caso (e se manca la P.IVA) il cliente si riconosce dal nome. cliente_id non va bene: ce n'e' uno per fattura.
-    const pivaGenerica = p => !p || /^[A-Z]{0,2}X{5,}$/i.test(String(p).trim());
     const chiave = f => pivaGenerica(f.cliente_piva) ? 'N:' + norm(f.cliente_denominazione) : 'P:' + f.cliente_piva;
     const get = f => {
       const k = chiave(f);
@@ -284,13 +315,15 @@
 
     for (const f of fatture) {
       if (azienda && f.azienda !== azienda) continue;
-      if (soloRiv && !nomiRiv.has(norm(f.cliente_denominazione))) continue;
+      const eRiv = nomiRiv.has(norm(f.cliente_denominazione));
+      if (soloRiv && !eRiv) continue;
+      if (f.tipo_documento !== 'TD04' && tipoCli !== 'tutti' && pivaGenerica(f.cliente_piva) && !eRiv
+          && !(tipoCli === 'b2b500' && Number(f.importo_totale) >= 500)) continue;
       if (cerca && !norm(f.cliente_denominazione).includes(cerca) && !(!pivaGenerica(f.cliente_piva) && norm(f.cliente_piva).includes(cerca))) continue;
       const tot = Number(f.importo_totale) || 0;
       if (f.tipo_documento === 'TD04') { get(f).nc += tot; continue; }
       if (f.annullata_ndc) continue;
-      const a = sumPf.get(f.id) || 0, b = sumIg.get(f.id) || 0;
-      const pagato = metodo === 'somma' ? a + b : metodo === 'banca' ? a : metodo === 'gest' ? b : Math.max(a, b);
+      const pagato = pagatoDi(f);
       const residuo = tot - pagato;
       if (residuo < minRes) continue;
       const scad = new Date(f.data + 'T00:00:00'); scad.setDate(scad.getDate() + giorni);
@@ -595,16 +628,12 @@
 
   // fatture di vendita ancora aperte di tutti i clienti (stesso calcolo della vista clienti)
   function fattureAperte() {
-    const { fatture, pf, ig } = DATI;
-    const metodo = $('f-metodo').value, azienda = $('f-azienda').value;
-    const sumPf = new Map(), sumIg = new Map();
-    pf.forEach(p => sumPf.set(p.fattura_id, (sumPf.get(p.fattura_id) || 0) + Number(p.importo_allocato || 0)));
-    ig.forEach(p => sumIg.set(p.fattura_vendita_id, (sumIg.get(p.fattura_vendita_id) || 0) + Number(p.importo || 0)));
+    const { fatture } = DATI;
+    const azienda = $('f-azienda').value, pagatoDi = costruisciPagato();
     const out = [];
     for (const f of fatture) {
       if (f.tipo_documento === 'TD04' || f.annullata_ndc || (azienda && f.azienda !== azienda)) continue;
-      const tot = Number(f.importo_totale) || 0, a = sumPf.get(f.id) || 0, b = sumIg.get(f.id) || 0;
-      const pagato = metodo === 'somma' ? a + b : metodo === 'banca' ? a : metodo === 'gest' ? b : Math.max(a, b);
+      const tot = Number(f.importo_totale) || 0, pagato = pagatoDi(f);
       const residuo = r2(tot - pagato);
       if (residuo < 0.02) continue;
       out.push({ ...f, tot, pagato, residuo, cliente: f.cliente_denominazione || '(senza nome)' });
@@ -657,7 +686,7 @@
     if (sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = k === 'nome' ? 1 : -1; }
     render();
   }));
-  ['f-azienda', 'f-cerca', 'f-min', 'f-giorni', 'f-ritardo', 'f-metodo', 'f-riv', 'f-nc']
+  ['f-azienda', 'f-cerca', 'f-min', 'f-giorni', 'f-ritardo', 'f-metodo', 'f-tipo', 'f-riv', 'f-nc']
     .forEach(id => $(id).addEventListener('input', render));
   // la data iniziale cambia quanto si scarica: ricarico i dati
   $('f-da').addEventListener('change', () => { DATI = null; carica(); });
