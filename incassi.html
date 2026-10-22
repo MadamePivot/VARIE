@@ -234,17 +234,20 @@
     riv.filter(r => r.attivo !== false).forEach(r => { nomiRiv.add(norm(r.nome)); (r.alias || []).forEach(a => nomiRiv.add(norm(a))); });
 
     const clienti = new Map();
-    const chiave = f => f.cliente_piva || f.cliente_id || norm(f.cliente_denominazione);
+    // XXXXXXX, DEXXXXXXX, FRXXXXXXX... sono codici convenzionali per le fatture estere, non identificano il cliente:
+    // in quel caso (e se manca la P.IVA) il cliente si riconosce dal nome. cliente_id non va bene: ce n'e' uno per fattura.
+    const pivaGenerica = p => !p || /^[A-Z]{0,2}X{5,}$/i.test(String(p).trim());
+    const chiave = f => pivaGenerica(f.cliente_piva) ? 'N:' + norm(f.cliente_denominazione) : 'P:' + f.cliente_piva;
     const get = f => {
       const k = chiave(f);
-      if (!clienti.has(k)) clienti.set(k, { k, nome: f.cliente_denominazione || '(senza nome)', piva: f.cliente_piva || '', righe: [], nc: 0 });
+      if (!clienti.has(k)) clienti.set(k, { k, nome: f.cliente_denominazione || '(senza nome)', piva: pivaGenerica(f.cliente_piva) ? '' : f.cliente_piva, righe: [], nc: 0 });
       return clienti.get(k);
     };
 
     for (const f of fatture) {
       if (azienda && f.azienda !== azienda) continue;
       if (soloRiv && !nomiRiv.has(norm(f.cliente_denominazione))) continue;
-      if (cerca && !norm(f.cliente_denominazione).includes(cerca) && !norm(f.cliente_piva).includes(cerca)) continue;
+      if (cerca && !norm(f.cliente_denominazione).includes(cerca) && !(!pivaGenerica(f.cliente_piva) && norm(f.cliente_piva).includes(cerca))) continue;
       const tot = Number(f.importo_totale) || 0;
       if (f.tipo_documento === 'TD04') { get(f).nc += tot; continue; }
       if (f.annullata_ndc) continue;
