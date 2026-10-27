@@ -14086,6 +14086,36 @@ function stessoNome(a, b) {
 }
 // alcune fatture vecchie del sezionale 3 hanno gia' il sezionale nel numero ("3/73"): non va ripetuto
 const numFattura = f => (f.sezionale && !String(f.numero || '').includes('/') ? f.sezionale + '/' : '') + (f.numero || '');
+// pagamenti collegati a fatture di vendita: movimenti abbinati in contabilita' (pagamenti_fatture) e incassi
+// registrati nel gestionale (incassi_gestionale), per vedere subito quanto della fattura e' gia' coperto
+async function pagamentiFattureVendita(ids) {
+  const mappa = new Map(ids.map(id => [id, { movimenti: [], gestionale: [], pagato: 0 }]));
+  if (!ids.length) return mappa;
+  const [{ data: pf, error: e1 }, { data: ig, error: e2 }] = await Promise.all([
+    fetchPerBlocchiDiId(ids, b => supabase.from('pagamenti_fatture').select('id,movimento_id,fattura_id,importo_allocato').eq('movimento_tabella', 'movimenti_bancari').eq('fattura_tipo', 'vendita').in('fattura_id', b)),
+    fetchPerBlocchiDiId(ids, b => supabase.from('incassi_gestionale').select('idpaga,fattura_vendita_id,data_pagamento,importo,tipo_registrazione,id_transazione').in('fattura_vendita_id', b)),
+  ]);
+  if (e1 || e2) throw (e1 || e2);
+  const idsMov = [...new Set((pf || []).map(x => x.movimento_id))];
+  const { data: mov, error: e3 } = idsMov.length ? await fetchPerBlocchiDiId(idsMov, b => supabase.from('movimenti_bancari').select('id,data_operazione,banca,numero_conto,descrizione,categoria').in('id', b)) : { data: [] };
+  if (e3) throw e3;
+  const movPerId = new Map((mov || []).map(m => [m.id, m]));
+  (pf || []).forEach(x => { const v = mappa.get(x.fattura_id); if (!v) return; v.movimenti.push({ ...(movPerId.get(x.movimento_id) || {}), importo: Number(x.importo_allocato) || 0 }); v.pagato += Number(x.importo_allocato) || 0; });
+  (ig || []).forEach(x => { const v = mappa.get(x.fattura_vendita_id); if (v) v.gestionale.push(x); });
+  mappa.forEach(v => { v.movimenti.sort((a, b) => String(a.data_operazione).localeCompare(String(b.data_operazione))); v.gestionale.sort((a, b) => String(a.data_pagamento).localeCompare(String(b.data_pagamento))); });
+  return mappa;
+}
+function htmlPagamentiFattura(f, p) {
+  if (!p) return '';
+  const residuo = Math.round(((Number(f.importo_totale) || 0) - p.pagato) * 100) / 100;
+  const righeMov = p.movimenti.map(m => `<tr><td>${fmtDate(m.data_operazione)}</td><td>${escHtml(m.banca || '')}${m.numero_conto ? ' …' + escHtml(String(m.numero_conto).slice(-4)) : ''}</td><td style="white-space:normal;">${escHtml(m.descrizione || m.categoria || '')}</td><td class="num">${fmtEUR(m.importo)}</td></tr>`).join('');
+  const righeGest = p.gestionale.map(g => `<tr><td>${fmtDate(g.data_pagamento)}</td><td>Gestionale</td><td style="white-space:normal;">${escHtml([g.tipo_registrazione, g.id_transazione].filter(Boolean).join(' · '))}</td><td class="num">${fmtEUR(g.importo)}</td></tr>`).join('');
+  return `<div style="font-size:12px; padding:4px 0;">
+    <b>Pagamenti collegati in contabilità:</b> ${fmtEUR(p.pagato)} € su ${fmtEUR(f.importo_totale)} € · ${Math.abs(residuo) < 0.01 ? '<span style="color:var(--green);">pagata</span>' : residuo > 0 ? `<span style="color:var(--red);">da incassare ${fmtEUR(residuo)} €</span>` : `incassato in piu' ${fmtEUR(-residuo)} €`}
+    ${righeMov ? `<table class="data" style="width:100%; margin-top:4px;"><tbody>${righeMov}</tbody></table>` : '<div class="muted">nessun movimento collegato</div>'}
+    ${righeGest ? `<div style="margin-top:6px;"><b>Incassi registrati nel gestionale</b></div><table class="data" style="width:100%; margin-top:2px;"><tbody>${righeGest}</tbody></table>` : ''}
+  </div>`;
+}
 const tipoBreve = t => ({ 'Progressivo (reso/rimborso)': 'Reso', 'Non in elenco PrestaShop': 'Manuale' })[t] || t || '';
 const descrFattura = f => f ? `${numFattura(f)} del ${fmtDate(f.data)} — ${f.cliente_denominazione || ''} (${fmtEUR(f.importo_totale)} €)` : '';
 
@@ -14140,6 +14170,7 @@ async function loadGiftFatture(forzaPs) {
       dataUso: link.find(u => u.data_utilizzo)?.data_utilizzo || (stima ? stima.data : ''), stima,
       giftCardInterna: [...new Set([...gcRif, ...link.map(u => u.gift_card_id && gcPerId.get(u.gift_card_id)).filter(Boolean)].map(g => g.codice || '(senza codice)'))].join(', '),
       fattureDescr: link.map(u => descrFattura(fattPerId.get(u.fattura_id)) || '(fattura non trovata)'),
+      fattureObj: link.map(u => fattPerId.get(u.fattura_id) || null),
       fattureTxt: link.map(u => descrFattura(fattPerId.get(u.fattura_id))).join(' | '),
       statoLink: avvisi.length ? 'Riferimenti discordanti' : (link.length ? 'Collegato' : 'Da collegare'),
     });
@@ -14176,7 +14207,7 @@ function disegnaGiftFatture() {
     { key: 'dataUso', label: 'Utilizzo', type: 'date', render: r => (r.dataUso ? (r.link.some(u => u.data_utilizzo) || (r.stima && r.stima.esatta) ? fmtDate(r.dataUso) : `<span class="muted" title="stimata dal numero d'ordine PrestaShop">~ ${fmtDate(r.dataUso)}</span>`) : '') + (r.ordineUtilizzo ? `<div class="muted" style="font-size:11px;">ordine ${escHtml(r.ordineUtilizzo)}</div>` : '') },
     { key: 'acquirente', label: 'Acquirente', type: 'text', get: r => `${r.acquirente} ${r.ordineAcquisto} ${r.rifOrdine} ${r.pagamento} ${r.giftCardInterna}`,
       render: r => `<div style="white-space:normal; max-width:190px; font-size:12px;">${escHtml(r.acquirente)}<div class="muted" style="font-size:11px;">${[r.ordineAcquisto && 'ord. ' + escHtml(r.ordineAcquisto), escHtml(r.rifOrdine), r.dataAcquisto && fmtDate(r.dataAcquisto), escHtml(r.pagamento), r.totalePagato != null && 'pagato ' + fmtEUR(r.totalePagato), r.scadenza && 'scade ' + fmtDate(r.scadenza), r.giftCardInterna && 'gift contab. ' + escHtml(r.giftCardInterna)].filter(Boolean).join(' · ')}</div></div>` },
-    { key: 'fattureTxt', label: 'Fattura', type: 'text', render: r => r.link.map((u, i) => `<div style="white-space:normal; min-width:180px; max-width:260px; font-size:12px;">${escHtml(r.fattureDescr[i])} · <b>${fmtEUR(u.importo)} €</b>${u.movimento_id ? ' <span class="muted" title="incasso con gift registrato sulla fattura">&#10003; incasso</span>' : ''} <button type="button" class="btn secondary" style="padding:2px 8px; font-size:11px;" data-gift-scollega="${u.id}">Scollega</button></div>`).join('') },
+    { key: 'fattureTxt', label: 'Fattura', type: 'text', render: r => r.link.map((u, i) => `<div style="white-space:normal; min-width:180px; max-width:260px; font-size:12px;">${r.fattureObj && r.fattureObj[i] ? `<a href="#" data-gift-pag="${u.id}" title="Mostra i pagamenti collegati alla fattura">${escHtml(r.fattureDescr[i])}</a>` : escHtml(r.fattureDescr[i])} · <b>${fmtEUR(u.importo)} €</b>${u.movimento_id ? ' <span class="muted" title="incasso con gift registrato sulla fattura">&#10003; incasso</span>' : ''} <button type="button" class="btn secondary" style="padding:2px 8px; font-size:11px;" data-gift-scollega="${u.id}">Scollega</button><div data-gift-pagbox="${u.id}" style="display:none; background:var(--gold-light); border-radius:4px; padding:2px 6px; margin-top:4px;"></div></div>`).join('') },
     { key: 'azioni', label: '', filterHtml: '&nbsp;', render: r => `<button type="button" class="btn" style="padding:4px 10px; font-size:12px;" data-gift-collega="${escHtml(r.chiave)}">${r.link.length ? 'Collega altra' : 'Collega'}</button>` },
   ];
   renderTable('giftFattureTable', colonne, righe, {
@@ -14184,6 +14215,16 @@ function disegnaGiftFatture() {
     afterRender: (container) => {
       container.querySelectorAll('[data-gift-collega]').forEach(b => b.addEventListener('click', () => apriCollegaGift(giftRighe.find(r => r.chiave === b.dataset.giftCollega))));
       container.querySelectorAll('[data-gift-scollega]').forEach(b => b.addEventListener('click', () => scollegaGift(b.dataset.giftScollega)));
+      container.querySelectorAll('[data-gift-pag]').forEach(a => a.addEventListener('click', async e => {
+        e.preventDefault();
+        const box = container.querySelector(`[data-gift-pagbox="${a.dataset.giftPag}"]`);
+        if (box.style.display !== 'none') { box.style.display = 'none'; return; }
+        const riga = giftRighe.find(r => r.link.some(u => u.id === a.dataset.giftPag));
+        const f = riga.fattureObj[riga.link.findIndex(u => u.id === a.dataset.giftPag)];
+        box.style.display = ''; box.innerHTML = '<span class="muted">Carico i pagamenti...</span>';
+        try { box.innerHTML = htmlPagamentiFattura(f, (await pagamentiFattureVendita([f.id])).get(f.id)); }
+        catch (err) { box.textContent = 'Errore: ' + (err.message || err); }
+      }));
     },
   });
 }
@@ -14217,7 +14258,7 @@ function apriCollegaGift(riga) {
     <label style="font-size:13px; display:block; margin:2px 0 12px;"><input type="checkbox" id="giftRegistraIncasso" checked> Registra anche l'incasso con gift sulla fattura (movimento "Gift card (non bancario)" collegato alla fattura, come per i collegamenti gia' fatti)</label>
     <div class="muted" id="giftCandInfo" style="margin:4px 0 6px;"></div>
     <div class="table-wrap" style="max-height:45vh;"><table class="data" style="width:100%;">
-      <thead><tr><th>Sez.</th><th>Anno</th><th>N. fattura</th><th>Data</th><th>Cliente</th><th class="num">Totale €</th><th></th></tr>
+      <thead><tr><th>Sez.</th><th>Anno</th><th>N. fattura</th><th>Data</th><th>Cliente</th><th class="num">Totale €</th><th class="num" title="Pagamenti collegati in contabilità: clicca la riga per il dettaglio">Pagato €</th><th></th></tr>
       <tr class="filter-row">
         <td><select id="giftFSez" style="width:60px;"><option value="">Tutti</option><option value="1">1</option><option value="3">3</option></select></td>
         <td><input id="giftFAnno" inputmode="numeric" placeholder="filtra..." style="width:60px;"></td>
@@ -14225,6 +14266,7 @@ function apriCollegaGift(riga) {
         <td></td>
         <td><input id="giftFCli" placeholder="filtra..."></td>
         <td><input id="giftFTot" inputmode="decimal" placeholder="filtra..." style="width:80px;"></td>
+        <td></td>
         <td><button type="button" class="btn secondary" id="giftFAzzera" style="padding:2px 8px; font-size:11px;" title="Svuota i filtri e torna alle fatture proposte">Azzera</button></td>
       </tr></thead>
       <tbody id="giftCandidati"></tbody>
@@ -14232,7 +14274,7 @@ function apriCollegaGift(riga) {
     <div class="status" id="giftSalvaStatus"></div>`;
   document.getElementById('modalGiftOverlay').style.display = 'flex';
   const corpo = document.getElementById('giftCandidati');
-  const vuoto = msg => { corpo.innerHTML = `<tr><td colspan="7" class="muted">${msg}</td></tr>`; };
+  const vuoto = msg => { corpo.innerHTML = `<tr><td colspan="8" class="muted">${msg}</td></tr>`; };
   let ultimaRicerca = 0;
   const cerca = async () => {
     const mia = ++ultimaRicerca;   // scrivendo nei filtri partono piu' ricerche: vale solo l'ultima
@@ -14277,13 +14319,24 @@ function apriCollegaGift(riga) {
     }).sort((a, b) => b.punti - a.punti).slice(0, 40);
     infoC.textContent = conFiltri ? `${lista.length} fatture trovate${lista.length === 40 ? ' (mostro le prime 40: restringi i filtri)' : ''}` : `${lista.length} fatture compatibili (dal ${fmtDate(new Date(msData - 10 * 86400000).toISOString())} al ${fmtDate(new Date(msData + 45 * 86400000).toISOString())}, importo almeno ${fmtEUR(imp)} €), le piu' probabili in alto · per cercare altre fatture scrivi nei filtri delle colonne`;
     if (!lista.length) { vuoto('Nessuna fattura trovata.'); return; }
+    let pag = new Map();
+    try { pag = await pagamentiFattureVendita(lista.map(f => f.id)); } catch (e) { infoC.textContent += ' · pagamenti non letti: ' + (e.message || e); }
+    if (mia !== ultimaRicerca) return;
     corpo.innerHTML = lista.map(f => {
+      const p = pag.get(f.id), res = p ? Math.round(((Number(f.importo_totale) || 0) - p.pagato) * 100) / 100 : null;
       const num = String(f.numero || ''), n = num.includes('/') ? num.split('/').pop() : num;
-      return `<tr>
+      return `<tr data-gift-riga="${f.id}" style="cursor:pointer;" title="Clicca per vedere i pagamenti collegati">
       <td>${escHtml(f.sezionale || (num.includes('/') ? num.split('/')[0] : ''))}</td><td>${escHtml(String(f.data || '').slice(0, 4))}</td><td><b>${escHtml(n)}</b></td><td>${fmtDate(f.data)}</td>
       <td style="white-space:normal;">${escHtml(f.cliente_denominazione)}</td><td class="num">${fmtEUR(f.importo_totale)}</td>
-      <td><button type="button" class="btn" style="padding:3px 10px; font-size:12px;" data-gift-scegli="${f.id}">Collega</button></td></tr>`;
+      <td class="num">${p ? fmtEUR(p.pagato) + (Math.abs(res) < 0.01 ? '' : `<div style="font-size:11px; color:${res > 0 ? 'var(--red)' : 'var(--muted)'};">${res > 0 ? 'manca ' + fmtEUR(res) : 'in piu\' ' + fmtEUR(-res)}</div>`) : ''}</td>
+      <td><button type="button" class="btn" style="padding:3px 10px; font-size:12px;" data-gift-scegli="${f.id}">Collega</button></td></tr>
+      <tr data-gift-dett="${f.id}" style="display:none;"><td colspan="8" style="background:var(--gold-light); white-space:normal;">${htmlPagamentiFattura(f, p)}</td></tr>`;
     }).join('');
+    corpo.querySelectorAll('[data-gift-riga]').forEach(tr => tr.addEventListener('click', e => {
+      if (e.target.closest('button')) return;
+      const d = corpo.querySelector(`[data-gift-dett="${tr.dataset.giftRiga}"]`);
+      d.style.display = d.style.display === 'none' ? '' : 'none';
+    }));
     corpo.querySelectorAll('[data-gift-scegli]').forEach(b => b.addEventListener('click', () => salvaCollegamentoGift(r, manuale, lista.find(f => f.id === b.dataset.giftScegli), b)));
   };
   // si filtra scrivendo: la ricerca parte poco dopo l'ultimo tasto
