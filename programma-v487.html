@@ -182,7 +182,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 486</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 487</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -2666,7 +2666,7 @@ async function loadPanoramica() {
     // bancari, Madame Pivot molte migliaia di fatture, serve fetchTutteLeRighe per non troncare
     fetchTutteLeRighe(() => supabase.from('fatture_vendita').select('id,importo_totale,tipo_documento').eq('azienda', AZIENDA_SCRITTURA_VENDITA)),
     fetchTutteLeRighe(() => supabase.from('movimenti_bancari').select('dare,avere').in('azienda', AZIENDE_LETTURA).eq('codice_conto', CONTO.anticipoIntercompany)),
-    fetchTutteLeRighe(() => supabase.from('movimenti_bancari').select('dare,avere').in('azienda', AZIENDE_LETTURA)),
+    fetchTutteLeRighe(() => supabase.from('movimenti_bancari').select('dare,avere,banca,categoria').in('azienda', AZIENDE_LETTURA)),
   ]);
 
   if (errFV || errIC || errMS) {
@@ -2681,7 +2681,13 @@ async function loadPanoramica() {
 
   // saldo netto dei movimenti bancari caricati: riflette solo i PDF gia' importati, non
   // necessariamente il saldo reale del conto se manca qualche estratto conto piu' vecchio
-  const saldoBanca = (movimentiSaldo || []).reduce((s, m) => s + (Number(m.avere) || 0) - (Number(m.dare) || 0), 0);
+  // v487: fuori dal saldo le righe di scomposizione delle rate di mutuo (l'addebito unico e' gia' sul conto: contate
+  // due volte la rata), e a parte cassa e pagamenti con gift card, che non sono conti bancari
+  const NON_BANCA = ['Cassa', 'Gift card (non bancario)'];
+  const netto = m => (Number(m.avere) || 0) - (Number(m.dare) || 0);
+  const movSaldo = (movimentiSaldo || []).filter(m => m.categoria !== 'RIMBORSO FINANZIAMENTO (da attestazione)');
+  const saldoBanca = movSaldo.filter(m => !NON_BANCA.includes(m.banca)).reduce((s, m) => s + netto(m), 0);
+  const saldoCassa = movSaldo.filter(m => m.banca === 'Cassa').reduce((s, m) => s + netto(m), 0);
 
   // debito fornitori + fatture aperte: stesso calcolo di Fatture da Pagare (note di credito, ritenute, reverse charge)
   const { rows: righeDaPagare, error: errCalcFp } = await calcolaFattureDaPagare();
@@ -2709,7 +2715,7 @@ async function loadPanoramica() {
   }
 
   kpiEl.innerHTML = [
-    { label: 'Saldo movimenti bancari', value: `€ ${fmtEUR(saldoBanca)}`, sub: 'netto dei PDF caricati finora' },
+    { label: 'Saldo movimenti bancari', value: `€ ${fmtEUR(saldoBanca)}`, sub: `conti bancari e wallet caricati finora${saldoCassa ? ` · cassa € ${fmtEUR(saldoCassa)} a parte` : ''}` },
     { label: 'Credito v/Madame Pivot', value: `€ ${fmtEUR(creditoCliente)}`, sub: `${fattureVendita.length} fatture emesse` },
     { label: 'Debito v/fornitori', value: `€ ${fmtEUR(totDebitoFornitori)}`, sub: `${righeAperte.length} fatture aperte` },
     { label: 'Fatture scadute', value: String(nScadute), sub: nScadute ? "da pagare con priorita'" : 'nessuna in ritardo' },
