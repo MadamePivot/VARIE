@@ -14084,7 +14084,9 @@ function stessoNome(a, b) {
   const x = normNome(a), y = new Set(normNome(b));
   return x.length > 0 && x.filter(t => y.has(t)).length >= Math.min(2, x.length);
 }
-const descrFattura = f => f ? `${f.sezionale ? f.sezionale + '/' : ''}${f.numero} del ${fmtDate(f.data)} — ${f.cliente_denominazione || ''} (${fmtEUR(f.importo_totale)} €)` : '';
+// alcune fatture vecchie del sezionale 3 hanno gia' il sezionale nel numero ("3/73"): non va ripetuto
+const numFattura = f => (f.sezionale && !String(f.numero || '').includes('/') ? f.sezionale + '/' : '') + (f.numero || '');
+const descrFattura = f => f ? `${numFattura(f)} del ${fmtDate(f.data)} — ${f.cliente_denominazione || ''} (${fmtEUR(f.importo_totale)} €)` : '';
 
 async function loadGiftFatture(forzaPs) {
   const info = document.getElementById('giftFattureInfo');
@@ -14217,8 +14219,12 @@ function apriCollegaGift(riga) {
     <div>${campo('giftImporto', 'Importo usato su questa fattura €', residuoDaCollegare ? residuoDaCollegare.toFixed(2) : '', 'number', 'step="0.01"')}${campo('giftDataUso', 'Data utilizzo', r.dataUso ? String(r.dataUso).slice(0, 10) : '', 'date')}${campo('giftOrdUso', 'Ordine / scontrino di utilizzo', r.ordineUtilizzo)}${campo('giftNota', 'Nota', '')}</div>
     <label style="font-size:13px; display:block; margin:2px 0 12px;"><input type="checkbox" id="giftRegistraIncasso" checked> Registra anche l'incasso con gift sulla fattura (movimento "Gift card (non bancario)" collegato alla fattura, come per i collegamenti gia' fatti)</label>
     <div class="toolbar">
-      <input id="giftCerca" placeholder="Cerca fattura: numero, cliente o importo" style="padding:6px; width:280px;">
-      <button type="button" class="btn secondary" id="giftCercaBtn">Cerca</button>
+      <label class="muted" style="font-size:12px;">Sezionale<br><select id="giftFSez" style="padding:5px;"><option value="">Tutti</option><option value="1">1</option><option value="3">3</option></select></label>
+      <label class="muted" style="font-size:12px;">Anno<br><input id="giftFAnno" type="number" min="2021" max="2099" placeholder="es. 2025" style="padding:5px; width:90px;"></label>
+      <label class="muted" style="font-size:12px;">N. fattura<br><input id="giftFNum" placeholder="es. 2591" style="padding:5px; width:100px;"></label>
+      <label class="muted" style="font-size:12px;">Cliente o importo<br><input id="giftCerca" placeholder="es. Rossi o 150,00" style="padding:5px; width:180px;"></label>
+      <button type="button" class="btn secondary" id="giftCercaBtn" style="align-self:flex-end;">Cerca</button>
+      <button type="button" class="btn secondary" id="giftFAzzera" style="align-self:flex-end;" title="Svuota i filtri e torna alle fatture proposte">Azzera</button>
       <span class="muted" id="giftCandInfo"></span>
     </div>
     <div class="table-wrap" id="giftCandidati"></div>
@@ -14229,19 +14235,31 @@ function apriCollegaGift(riga) {
     infoC.textContent = 'Cerco...';
     const imp = Number(document.getElementById('giftImporto').value) || 0;
     let q = supabase.from('fatture_vendita').select('id,numero,sezionale,data,tipo_documento,cliente_denominazione,importo_totale').in('azienda', AZIENDE_LETTURA_VENDITA);
-    const t = (testo || '').trim().replace(/[,()*%]/g, ' ').trim();
+    const t = (testo || '').trim().replace(/[()*%]/g, ' ').trim();
     const dataRif = document.getElementById('giftDataUso').value;
+    // filtri per colonna: sezionale, anno e numero fattura (si possono combinare con cliente/importo)
+    const fSez = document.getElementById('giftFSez').value;
+    const fAnno = document.getElementById('giftFAnno').value.trim();
+    const fNum = document.getElementById('giftFNum').value.trim().replace(/[^0-9A-Za-z/]/g, '');
+    const conFiltri = !!(t || fSez || fAnno || fNum);
+    if (fSez) q = q.eq('sezionale', fSez);
+    if (/^\d{4}$/.test(fAnno)) q = q.gte('data', fAnno + '-01-01').lte('data', fAnno + '-12-31');
+    if (fNum) {
+      const n = fNum.includes('/') ? fNum.split('/').pop() : fNum;
+      q = q.or(`numero.eq.${n},numero.like.*/${n}` + (/^\d+$/.test(n) ? `,numero_num.eq.${n}` : ''));
+    }
     if (t) {
-      // "150,50" / "1.234,56" / "150.5" = importo; un numero intero puo' essere sia il numero fattura sia l'importo
+      // "150", "150,50", "1.234,56" = importo (il numero fattura ha il suo campo); altrimenti nome del cliente
       const num = Number(t.includes(',') ? t.replace(/\./g, '').replace(',', '.') : t);
-      if (!isNaN(num) && /[.,]\d{1,2}$/.test(t)) q = q.eq('importo_totale', num);
-      else if (!isNaN(num)) q = q.or(`numero.ilike.%${t}%,importo_totale.eq.${num}`);
-      else q = q.or(`numero.ilike.%${t}%,cliente_denominazione.ilike.%${t}%`);
+      if (!isNaN(num)) q = q.eq('importo_totale', num);
+      else q = q.ilike('cliente_denominazione', `%${t.replace(/,/g, ' ')}%`);
+    } else if (conFiltri) {
+      // solo filtri di colonna: nessun vincolo di data o importo
     } else if (dataRif) {
       const d = new Date(dataRif + 'T12:00:00Z'), sposta = g => new Date(d.getTime() + g * 86400000).toISOString().slice(0, 10);
       q = q.gte('data', sposta(-10)).lte('data', sposta(45));
       if (imp) q = q.gte('importo_totale', imp - 0.01);
-    } else { infoC.textContent = 'Scrivi numero, cliente o importo della fattura (senza data di utilizzo non posso proporre le fatture compatibili).'; document.getElementById('giftCandidati').innerHTML = ''; return; }
+    } else { infoC.textContent = 'Usa i filtri sezionale, anno, numero fattura, cliente o importo (senza data di utilizzo non posso proporre le fatture compatibili).'; document.getElementById('giftCandidati').innerHTML = ''; return; }
     const { data, error } = await q.order('data', { ascending: false }).limit(300);
     if (error) { infoC.textContent = 'Errore: ' + error.message; return; }
     const msData = dataRif ? Date.parse(dataRif) : null;
@@ -14252,15 +14270,17 @@ function apriCollegaGift(riga) {
       const punti = (nome ? 100 : 0) - (giorni == null ? 0 : Math.abs(giorni - 7)) - (Number(f.importo_totale) < imp - 0.01 ? 50 : 0) - (giftUtilizziPerFattura.has(f.id) ? 20 : 0);
       return { ...f, nome, giorni, punti };
     }).sort((a, b) => b.punti - a.punti).slice(0, 40);
-    infoC.textContent = t ? `${lista.length} fatture trovate` : `${lista.length} fatture compatibili (dal ${fmtDate(new Date(msData - 10 * 86400000).toISOString())} al ${fmtDate(new Date(msData + 45 * 86400000).toISOString())}, importo almeno ${fmtEUR(imp)} €), le piu' probabili in alto`;
+    infoC.textContent = conFiltri ? `${lista.length} fatture trovate${lista.length === 40 ? ' (mostro le prime 40: restringi i filtri)' : ''}` : `${lista.length} fatture compatibili (dal ${fmtDate(new Date(msData - 10 * 86400000).toISOString())} al ${fmtDate(new Date(msData + 45 * 86400000).toISOString())}, importo almeno ${fmtEUR(imp)} €), le piu' probabili in alto`;
     document.getElementById('giftCandidati').innerHTML = lista.length ? `<table class="data" style="width:100%;"><thead><tr><th>Fattura</th><th>Data</th><th>Cliente</th><th class="num">Totale €</th><th>Indizi</th><th></th></tr></thead><tbody>${lista.map(f => `<tr>
-      <td>${escHtml((f.sezionale ? f.sezionale + '/' : '') + f.numero)}</td><td>${fmtDate(f.data)}</td><td>${escHtml(f.cliente_denominazione)}</td><td class="num">${fmtEUR(f.importo_totale)}</td>
+      <td>${escHtml(numFattura(f))}</td><td>${fmtDate(f.data)}</td><td>${escHtml(f.cliente_denominazione)}</td><td class="num">${fmtEUR(f.importo_totale)}</td>
       <td class="muted" style="font-size:11px;">${[f.nome && '<b style="color:var(--green);">stesso nome dell\'acquirente</b>', f.giorni != null && (f.giorni >= 0 ? f.giorni + ' gg dopo l\'utilizzo' : -f.giorni + ' gg prima'), giftUtilizziPerFattura.has(f.id) && 'ha gia\' gift: ' + escHtml(giftUtilizziPerFattura.get(f.id).join(', '))].filter(Boolean).join(' · ')}</td>
       <td><button type="button" class="btn" style="padding:3px 10px; font-size:12px;" data-gift-scegli="${f.id}">Collega</button></td></tr>`).join('')}</tbody></table>` : '<p class="muted">Nessuna fattura trovata.</p>';
     document.querySelectorAll('[data-gift-scegli]').forEach(b => b.addEventListener('click', () => salvaCollegamentoGift(r, manuale, lista.find(f => f.id === b.dataset.giftScegli), b)));
   };
   document.getElementById('giftCercaBtn').addEventListener('click', () => cerca(document.getElementById('giftCerca').value));
-  document.getElementById('giftCerca').addEventListener('keydown', e => { if (e.key === 'Enter') cerca(e.target.value); });
+  ['giftCerca', 'giftFAnno', 'giftFNum'].forEach(id => document.getElementById(id).addEventListener('keydown', e => { if (e.key === 'Enter') cerca(document.getElementById('giftCerca').value); }));
+  document.getElementById('giftFSez').addEventListener('change', () => cerca(document.getElementById('giftCerca').value));
+  document.getElementById('giftFAzzera').addEventListener('click', () => { ['giftFSez', 'giftFAnno', 'giftFNum', 'giftCerca'].forEach(id => { document.getElementById(id).value = ''; }); cerca(''); });
   if (r.dataUso) cerca(''); else document.getElementById('giftCandInfo').textContent = 'Indica la data di utilizzo o cerca la fattura per numero, cliente o importo.';
 }
 
@@ -14282,7 +14302,7 @@ async function salvaCollegamentoGift(r, manuale, fattura, btn) {
     if (document.getElementById('giftRegistraIncasso').checked) {
       const { data: mov, error } = await supabase.from('movimenti_bancari').insert({
         azienda: AZIENDA_SCRITTURA, banca: 'Gift card (non bancario)', data_operazione: dataUso, categoria: 'GIFT CARD UTILIZZO',
-        descrizione: `Pagamento con gift card ${codice} fatt. ${fattura.sezionale ? fattura.sezionale + '/' : ''}${fattura.numero} ${fattura.cliente_denominazione || ''}${ordineUso ? ` (ordine ${ordineUso})` : ''} [non bancario]`,
+        descrizione: `Pagamento con gift card ${codice} fatt. ${numFattura(fattura)} ${fattura.cliente_denominazione || ''}${ordineUso ? ` (ordine ${ordineUso})` : ''} [non bancario]`,
         avere: importo, riconciliato: true, riga_hash: 'gift-' + crypto.randomUUID(),
       }).select('id').single();
       if (error) throw error;
@@ -14306,7 +14326,7 @@ async function salvaCollegamentoGift(r, manuale, fattura, btn) {
       importo_buono: manuale ? numOrNull(val('giftImportoBuono')) : numOrNull(r.importo), scadenza: (manuale ? val('giftScadenza') : r.scadenza) || null,
       ordine_acquisto: (manuale ? val('giftOrdAcq') : r.ordineAcquisto) || null, rif_ordine_acquisto: rifAcq || null,
       pagamento_acquisto: (manuale ? val('giftPagAcq') : r.pagamento) || null, totale_pagato_acquisto: manuale ? null : numOrNull(r.totalePagato),
-      fattura_numero: (fattura.sezionale ? fattura.sezionale + '/' : '') + fattura.numero, fattura_data: fattura.data, fattura_cliente: fattura.cliente_denominazione || null,
+      fattura_numero: numFattura(fattura), fattura_data: fattura.data, fattura_cliente: fattura.cliente_denominazione || null,
       azienda: AZIENDA_SCRITTURA, fonte: manuale ? 'manuale' : 'PrestaShop (pagina GIFT)',
     });
     if (e3) throw e3;
