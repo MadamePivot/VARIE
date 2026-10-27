@@ -14254,7 +14254,7 @@ function apriCollegaGift(riga) {
       ${rif('Gift card contabilità', escHtml(r.giftCardInterna))}${rif('Scadenza', r.scadenza && fmtDate(r.scadenza))}
       ${rif('Già collegato', r.link.length ? escHtml(r.fattureTxt) : '')}
     </table>`}
-    <div>${campo('giftImporto', 'Importo usato su questa fattura €', residuoDaCollegare ? residuoDaCollegare.toFixed(2) : '', 'number', 'step="0.01"')}${campo('giftDataUso', 'Data utilizzo', r.dataUso ? String(r.dataUso).slice(0, 10) : '', 'date')}${campo('giftOrdUso', 'Ordine / scontrino di utilizzo', r.ordineUtilizzo)}${campo('giftNota', 'Nota', '')}</div>
+    <div>${campo('giftImporto', 'Importo usato su questa fattura €', residuoDaCollegare ? residuoDaCollegare.toFixed(2) : '', 'number', 'step="0.01"')}${campo('giftDataUso', 'Data stimata (per proporre le fatture)', r.dataUso ? String(r.dataUso).slice(0, 10) : '', 'date')}${campo('giftOrdUso', 'Ordine / scontrino di utilizzo', r.ordineUtilizzo)}${campo('giftNota', 'Nota', '')}</div>
     <label style="font-size:13px; display:block; margin:2px 0 12px;"><input type="checkbox" id="giftRegistraIncasso" checked> Registra anche l'incasso con gift sulla fattura (movimento "Gift card (non bancario)" collegato alla fattura, come per i collegamenti gia' fatti)</label>
     <div class="muted" id="giftCandInfo" style="margin:4px 0 6px;"></div>
     <div class="table-wrap" style="max-height:45vh;"><table class="data" style="width:100%;">
@@ -14356,7 +14356,8 @@ async function salvaCollegamentoGift(r, manuale, fattura, btn) {
   const val = id => (document.getElementById(id).value || '').trim();
   const importo = Number(val('giftImporto'));
   if (!(importo > 0)) { setStatus(stato, 'Indica l\'importo del gift usato su questa fattura.', 'err'); return; }
-  const dataUso = val('giftDataUso') || fattura.data;
+  // la data di utilizzo del gift e' quella della fattura (anche per il movimento di incasso con gift)
+  const dataUso = fattura.data;
   const codice = manuale ? val('giftCodice').toUpperCase() : r.codice;
   if (manuale && !codice) { setStatus(stato, 'Indica almeno il codice del gift.', 'err'); return; }
   const ordineUso = val('giftOrdUso');
