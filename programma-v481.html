@@ -182,7 +182,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 464</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 481</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -315,7 +315,7 @@
     </div>
   </section>
 
-  <!-- v464: pagina Gift card (programma "GIFT" da Archivio Progetti) e collegamento gift usati <-> fatture vendita -->
+  <!-- v481: pagina Gift card (programma "GIFT" da Archivio Progetti) e collegamento gift usati <-> fatture vendita -->
   <section id="tab-giftCard">
     <div class="card" style="padding:0; overflow:hidden;">
       <div class="toolbar" style="padding:10px 14px; margin:0;">
@@ -2137,8 +2137,8 @@ const NAV = [
     { id: 'vendita', label: 'Fatture Vendita' },
     { id: 'notule', label: 'Notule Agenti' },
     { id: 'scontrini', label: 'Scontrini e Corrispettivi' }, // v426: programma "Vendite - Fatture e Corrispettivi" da Archivio Progetti
-    { id: 'giftCard', label: 'Gift card' }, // v464: programma "GIFT" da Archivio Progetti
-    { id: 'giftFatture', label: 'Gift usati ↔ Fatture' }, // v464
+    { id: 'giftCard', label: 'Gift card' }, // v481: programma "GIFT" da Archivio Progetti
+    { id: 'giftFatture', label: 'Gift usati ↔ Fatture' }, // v481
   ]},
   { group: 'Banca', items: [
     // v191: una voce per ogni banca/conto (Banco di Lucca e del Tirreno, Viva.com, PayPal...), ognuna
@@ -2220,7 +2220,7 @@ function itemVisibile(it) {
   if (it.id === 'mastrinoCliente') return aziendaAttivaChiave === 'MP_SPAZIO_LAB';
   // i mastrini Mexal importati dal vecchio gestionale coprono solo Madame Pivot
   if (it.id === 'mastriniMexal' || it.id === 'fattureAperteMexal') return aziendaAttivaChiave === 'MADAME_PIVOT';
-  // v464: le gift card sono vendute sul sito Madame Pivot
+  // v481: le gift card sono vendute sul sito Madame Pivot
   if (it.id === 'giftCard' || it.id === 'giftFatture') return aziendaAttivaChiave === 'MADAME_PIVOT';
   return true;
 }
@@ -14026,7 +14026,7 @@ function loadScontrini(forza) { return caricaProgettoInFrame('Vendite - Fatture 
 document.getElementById('btnRicaricaScontrini').addEventListener('click', () => loadScontrini(true));
 document.getElementById('btnRicaricaDichIntento').addEventListener('click', () => loadDichiarazioneIntento(true));
 
-/* ---------------- v464: Gift card (programma "GIFT" da Archivio Progetti) e gift usati <-> fatture vendita ---------------- */
+/* ---------------- v481: Gift card (programma "GIFT" da Archivio Progetti) e gift usati <-> fatture vendita ---------------- */
 function loadGiftCard(forza) { return caricaProgettoInFrame('GIFT', 'giftCardFrame', 'giftCardInfo', forza); }
 document.getElementById('btnRicaricaGiftCard').addEventListener('click', () => loadGiftCard(true));
 document.getElementById('btnVaiGiftFatture').addEventListener('click', () => activateTab('giftFatture'));
