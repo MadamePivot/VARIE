@@ -182,7 +182,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 483</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 484</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -2229,6 +2229,8 @@ function itemVisibile(it) {
   if (it.id === 'mastrinoCliente') return aziendaAttivaChiave === 'MP_SPAZIO_LAB';
   // i mastrini Mexal importati dal vecchio gestionale coprono solo Madame Pivot
   if (it.id === 'mastriniMexal' || it.id === 'fattureAperteMexal') return aziendaAttivaChiave === 'MADAME_PIVOT';
+  // v484: le gift card sono di Madame Pivot, non di MP Spazio Lab
+  if (it.id === 'giftCard' || it.id === 'giftFatture') return aziendaAttivaChiave === 'MADAME_PIVOT';
   return true;
 }
 
@@ -14136,8 +14138,7 @@ function htmlPagamentiFattura(f, p) {
     ${righeGest ? `<div style="margin-top:6px;"><b>Incassi registrati nel gestionale</b></div><table class="data" style="width:100%; margin-top:2px;"><tbody>${righeGest}</tbody></table>` : ''}
   </div>`;
 }
-// v483: le gift card sono di Madame Pivot: la sezione lavora sempre su fatture e movimenti Madame Pivot,
-// qualunque azienda sia scelta in alto (prima le voci sparivano con MP Spazio Lab)
+// le gift card sono di Madame Pivot: la sezione (visibile solo con Madame Pivot) scrive e legge sempre i dati Madame Pivot
 const GIFT_AZ = AZIENDE_REGISTRO.MADAME_PIVOT;
 const tipoBreve = t => ({ 'Progressivo (reso/rimborso)': 'Reso', 'Non in elenco PrestaShop': 'Manuale' })[t] || t || '';
 const descrFattura = f => f ? `${numFattura(f)} del ${fmtDate(f.data)} — ${f.cliente_denominazione || ''} (${fmtEUR(f.importo_totale)} €)` : '';
