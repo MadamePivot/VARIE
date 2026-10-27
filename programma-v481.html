@@ -14086,6 +14086,7 @@ function stessoNome(a, b) {
 }
 // alcune fatture vecchie del sezionale 3 hanno gia' il sezionale nel numero ("3/73"): non va ripetuto
 const numFattura = f => (f.sezionale && !String(f.numero || '').includes('/') ? f.sezionale + '/' : '') + (f.numero || '');
+const tipoBreve = t => ({ 'Progressivo (reso/rimborso)': 'Reso', 'Non in elenco PrestaShop': 'Manuale' })[t] || t || '';
 const descrFattura = f => f ? `${numFattura(f)} del ${fmtDate(f.data)} — ${f.cliente_denominazione || ''} (${fmtEUR(f.importo_totale)} €)` : '';
 
 async function loadGiftFatture(forzaPs) {
@@ -14167,19 +14168,15 @@ function disegnaGiftFatture() {
   document.getElementById('giftFattureInfo').textContent = `${giftRighe.length} buoni usati · ${n('Collegato')} collegati · ${n('Da collegare')} da collegare (${fmtEUR(totDa)} €) · ${n('Riferimenti discordanti')} con riferimenti discordanti`
     + (giftPs && giftPs.file ? ` · buoni da ${giftPs.file} (dati PrestaShop al ${giftPs.generato})` : '');
   const colonne = [
-    { key: 'statoLink', label: 'Stato', type: 'select', render: r => `<span class="pill" style="background:${r.statoLink === 'Collegato' ? '#DDEBD5' : r.statoLink === 'Da collegare' ? 'var(--gold-light)' : '#f3d6cf'}">${r.statoLink}</span>${r.avvisi.length ? `<div class="muted" style="font-size:11px; white-space:normal; max-width:260px; color:var(--red);">${r.avvisi.map(escHtml).join('<br>')}</div>` : ''}` },
-    { key: 'codice', label: 'Codice', type: 'text', render: r => `<b>${escHtml(r.codice)}</b><div class="muted" style="font-size:11px;">${escHtml(r.nome)}</div>` },
-    { key: 'psId', label: 'Id PS', type: 'number', numeric: true },
-    { key: 'tipo', label: 'Tipo', type: 'select' },
-    { key: 'importo', label: 'Buono €', type: 'number', numeric: true, render: r => fmtEUR(r.importo) },
-    { key: 'usato', label: 'Usato €', type: 'number', numeric: true, render: r => fmtEUR(r.usato) + (Number(r.residuo) > 0 ? `<div class="muted" style="font-size:11px;">residuo ${fmtEUR(r.residuo)}</div>` : '') },
-    { key: 'ordineUtilizzo', label: 'Ordine utilizzo', type: 'text' },
-    { key: 'dataUso', label: 'Data utilizzo', type: 'date', render: r => r.dataUso ? (r.link.some(u => u.data_utilizzo) || (r.stima && r.stima.esatta) ? fmtDate(r.dataUso) : `<span class="muted" title="stimata dal numero d'ordine PrestaShop">~ ${fmtDate(r.dataUso)}</span>`) : '' },
-    { key: 'acquirente', label: 'Acquirente', type: 'text' },
-    { key: 'rifOrdine', label: 'Ordine acquisto', type: 'text', get: r => `${r.ordineAcquisto} ${r.rifOrdine} ${r.pagamento}`, render: r => r.ordineAcquisto || r.rifOrdine ? `${escHtml(r.ordineAcquisto)}${r.rifOrdine ? ' · ' + escHtml(r.rifOrdine) : ''}<div class="muted" style="font-size:11px;">${r.dataAcquisto ? fmtDate(r.dataAcquisto) : ''} ${escHtml(r.pagamento)}${r.totalePagato != null ? ' · pagato ' + fmtEUR(r.totalePagato) + ' €' : ''}</div>` : '' },
-    { key: 'scadenza', label: 'Scadenza', type: 'date', render: r => r.scadenza ? fmtDate(r.scadenza) : '' },
-    { key: 'giftCardInterna', label: 'Gift card contabilità', type: 'text' },
-    { key: 'fattureTxt', label: 'Fattura', type: 'text', render: r => r.link.map((u, i) => `<div style="white-space:normal; min-width:220px;">${escHtml(r.fattureDescr[i])} · <b>${fmtEUR(u.importo)} €</b>${u.movimento_id ? ' <span class="muted" title="incasso con gift registrato sulla fattura">&#10003; incasso</span>' : ''} <button type="button" class="btn secondary" style="padding:2px 8px; font-size:11px;" data-gift-scollega="${u.id}">Scollega</button></div>`).join('') },
+    { key: 'statoLink', label: 'Stato', type: 'select', render: r => `<span class="pill" style="background:${r.statoLink === 'Collegato' ? '#DDEBD5' : r.statoLink === 'Da collegare' ? 'var(--gold-light)' : '#f3d6cf'}">${r.statoLink}</span>${r.avvisi.length ? `<div class="muted" style="font-size:11px; white-space:normal; max-width:200px; color:var(--red);">${r.avvisi.map(escHtml).join('<br>')}</div>` : ''}` },
+    // v481: colonne raggruppate (codice+tipo, importi, ordine+data di utilizzo, dati di acquisto) perche' la tabella stia nella pagina
+    { key: 'codice', label: 'Buono', type: 'text', get: r => `${r.codice} ${r.nome} ${r.psId ?? ''}`, render: r => `<b>${escHtml(r.codice)}</b><div class="muted" style="font-size:11px; white-space:normal; max-width:170px;">${escHtml(r.nome)}${r.psId != null ? ' · id ' + escHtml(r.psId) : ''}</div>` },
+    { key: 'tipoBreve', label: 'Tipo', type: 'select', get: r => tipoBreve(r.tipo), render: r => `<span class="muted" style="font-size:12px;" title="${escHtml(r.tipo)}">${escHtml(tipoBreve(r.tipo))}</span>` },
+    { key: 'usato', label: 'Usato €', type: 'number', numeric: true, render: r => `<b>${fmtEUR(r.usato)}</b><div class="muted" style="font-size:11px;">su ${fmtEUR(r.importo)}${Number(r.residuo) > 0 ? ' · res. ' + fmtEUR(r.residuo) : ''}</div>` },
+    { key: 'dataUso', label: 'Utilizzo', type: 'date', render: r => (r.dataUso ? (r.link.some(u => u.data_utilizzo) || (r.stima && r.stima.esatta) ? fmtDate(r.dataUso) : `<span class="muted" title="stimata dal numero d'ordine PrestaShop">~ ${fmtDate(r.dataUso)}</span>`) : '') + (r.ordineUtilizzo ? `<div class="muted" style="font-size:11px;">ordine ${escHtml(r.ordineUtilizzo)}</div>` : '') },
+    { key: 'acquirente', label: 'Acquirente', type: 'text', get: r => `${r.acquirente} ${r.ordineAcquisto} ${r.rifOrdine} ${r.pagamento} ${r.giftCardInterna}`,
+      render: r => `<div style="white-space:normal; max-width:190px; font-size:12px;">${escHtml(r.acquirente)}<div class="muted" style="font-size:11px;">${[r.ordineAcquisto && 'ord. ' + escHtml(r.ordineAcquisto), escHtml(r.rifOrdine), r.dataAcquisto && fmtDate(r.dataAcquisto), escHtml(r.pagamento), r.totalePagato != null && 'pagato ' + fmtEUR(r.totalePagato), r.scadenza && 'scade ' + fmtDate(r.scadenza), r.giftCardInterna && 'gift contab. ' + escHtml(r.giftCardInterna)].filter(Boolean).join(' · ')}</div></div>` },
+    { key: 'fattureTxt', label: 'Fattura', type: 'text', render: r => r.link.map((u, i) => `<div style="white-space:normal; min-width:180px; max-width:260px; font-size:12px;">${escHtml(r.fattureDescr[i])} · <b>${fmtEUR(u.importo)} €</b>${u.movimento_id ? ' <span class="muted" title="incasso con gift registrato sulla fattura">&#10003; incasso</span>' : ''} <button type="button" class="btn secondary" style="padding:2px 8px; font-size:11px;" data-gift-scollega="${u.id}">Scollega</button></div>`).join('') },
     { key: 'azioni', label: '', filterHtml: '&nbsp;', render: r => `<button type="button" class="btn" style="padding:4px 10px; font-size:12px;" data-gift-collega="${escHtml(r.chiave)}">${r.link.length ? 'Collega altra' : 'Collega'}</button>` },
   ];
   renderTable('giftFattureTable', colonne, righe, {
