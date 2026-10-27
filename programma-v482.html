@@ -2137,8 +2137,17 @@ const NAV = [
     { id: 'vendita', label: 'Fatture Vendita' },
     { id: 'notule', label: 'Notule Agenti' },
     { id: 'scontrini', label: 'Scontrini e Corrispettivi' }, // v426: programma "Vendite - Fatture e Corrispettivi" da Archivio Progetti
-    { id: 'giftCard', label: 'Gift card' }, // v481: programma "GIFT" da Archivio Progetti
-    { id: 'giftFatture', label: 'Gift usati ↔ Fatture' }, // v481
+  ]},
+  // v482: menu a livelli per i gift (le voci stavano diventando troppe sotto Fatture): ogni sottovoce apre
+  // la sezione con il filtro gia' impostato
+  { group: 'Gift card', items: [
+    { id: 'giftCard', label: 'Pagina gift (PrestaShop)' }, // programma "GIFT" da Archivio Progetti
+    { id: 'giftFatture', label: 'Gift usati ↔ Fatture', sottovoci: [
+      { label: 'Da collegare', select: 'giftFattureFiltro', valore: 'daCollegare' },
+      { label: 'Collegati', select: 'giftFattureFiltro', valore: 'collegati' },
+      { label: 'Riferimenti discordanti', select: 'giftFattureFiltro', valore: 'discordanti' },
+      { label: 'Tutti i buoni usati', select: 'giftFattureFiltro', valore: '' },
+    ]},
   ]},
   { group: 'Banca', items: [
     // v191: una voce per ogni banca/conto (Banco di Lucca e del Tirreno, Viva.com, PayPal...), ognuna
@@ -2360,6 +2369,13 @@ async function caricaVociEstrattiSidebar() {
 }
 
 function renderVoceSidebar(it) {
+  if (it.sottovoci) {
+    // voce con un secondo livello: la voce apre la sezione, le sottovoci la aprono gia' filtrata
+    const attiva = currentTabId === it.id;
+    const filtroAttuale = v => (document.getElementById(v.select) || {}).value;
+    return `<button type="button" class="side-item ${attiva ? 'active' : ''}" data-tab="${it.id}">${it.label}</button>`
+      + it.sottovoci.map(v => `<button type="button" class="side-item side-subitem ${attiva && filtroAttuale(v) === v.valore ? 'active' : ''}" data-tab-filtro="${it.id}|${v.select}|${v.valore}">${v.label}</button>`).join('');
+  }
   const parentAttivoEstr = currentTabId === 'estrattiTrimestrali';
   const voceAttiva = v => parentAttivoEstr && stessaVoce(v, estrattoVoceCorrente);
   if (it.banche) {
@@ -2428,6 +2444,12 @@ function renderSidebar() {
   nav.innerHTML = html;
   nav.querySelectorAll('[data-standalone]').forEach(b => b.addEventListener('click', () => activateTab(b.dataset.standalone)));
   nav.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => activateTab(b.dataset.tab)));
+  nav.querySelectorAll('[data-tab-filtro]').forEach(b => b.addEventListener('click', () => {
+    const [tab, select, valore] = b.dataset.tabFiltro.split('|');
+    const sel = document.getElementById(select);
+    if (sel) sel.value = valore;
+    activateTab(tab);
+  }));
   nav.querySelectorAll('[data-estratto-voce]').forEach(b => b.addEventListener('click', () => {
     const [tipo, chiave, numeroConto = ''] = b.dataset.estrattoVoce.split('|');
     const trovata = [...sidebarBanche, ...sidebarCarte].find(v => stessaVoce(v, { tipo, chiave, numeroConto }));
@@ -14229,7 +14251,7 @@ function disegnaGiftFatture() {
   });
 }
 document.getElementById('btnRefreshGiftFatture').addEventListener('click', () => loadGiftFatture(true));
-document.getElementById('giftFattureFiltro').addEventListener('change', disegnaGiftFatture);
+document.getElementById('giftFattureFiltro').addEventListener('change', () => { disegnaGiftFatture(); renderSidebar(); });
 document.getElementById('btnGiftManuale').addEventListener('click', () => apriCollegaGift(null));
 
 function chiudiModaleGift() { document.getElementById('modalGiftOverlay').style.display = 'none'; }
