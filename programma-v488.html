@@ -182,7 +182,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 487</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 488</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -1012,6 +1012,9 @@
         <label for="mastriniFornitoreSel">Fornitore:</label>
         <select id="mastriniFornitoreSel" style="min-width:320px;"></select>
         <button class="btn secondary" id="btnRefreshMastriniFornitori">Aggiorna</button>
+        <button class="btn secondary" id="btnPdfMastrinoFornitore" title="PDF del mastrino del fornitore selezionato (con l'anno scelto in alto, o tutta la storia)">Stampa PDF</button>
+        <button class="btn secondary" id="btnPdfMastriniTutti" title="Un unico PDF con il mastrino di ogni fornitore presente in tendina">PDF tutti i fornitori</button>
+        <span class="muted" id="mastriniFornitorePdfStato"></span>
         <label style="display:flex; align-items:center; gap:5px; font-size:13px;"><input type="checkbox" id="mastriniFornitoreNascondiZero" checked> Nascondi fornitori a saldo zero</label>
         <span class="muted" id="mastriniFornitoreSaldo"></span>
       </div>
@@ -12199,6 +12202,131 @@ document.getElementById('mastriniFornitoreNascondiZero').addEventListener('chang
 // risposta piu' lenta arriverebbe per ultima e sovrascriverebbe la tabella con i dati del
 // fornitore sbagliato - ogni chiamata scrive sul DOM solo se il suo gettone e' ancora quello attuale
 let mastriniFornitoreGen = 0;
+
+/* ---- v488: stampa PDF dei mastrini fornitori (jsPDF a mano, stesso stile dei DDT) ---- */
+let ultimoMastrinoFornitore = null;
+const testoPdf = t => String(t == null ? '' : t).replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+// disegna un mastrino a partire da una pagina nuova del documento (la prima pagina se nuovo e' true)
+function disegnaMastrinoFornitorePdf(doc, m, nuovo) {
+  if (!nuovo) doc.addPage();
+  const W = 210, MX = 12, BOTTOM = 280;
+  const col = { data: MX, tipo: MX + 19, desc: MX + 46, dare: 150, avere: 172, saldo: W - MX };
+  const periodo = m.anno ? `anno ${m.anno}` : 'tutti i movimenti';
+  const intestazione = () => {
+    let y = 15;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
+    doc.text(AZIENDA_SCRITTURA, MX, y);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5);
+    doc.text(`P.IVA ${PIVA_MP}`, MX, y + 4.5);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(13);
+    doc.text('MASTRINO FORNITORE', W - MX, y, { align: 'right' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+    doc.text(periodo, W - MX, y + 5, { align: 'right' });
+    y += 13;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5);
+    doc.text(doc.splitTextToSize(m.nome || '', 150)[0] || '', MX, y);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5);
+    doc.text(`P.IVA / C.F. ${m.piva}`, MX, y + 4.5);
+    y += 10;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5);
+    doc.text('Data', col.data, y); doc.text('Tipo', col.tipo, y); doc.text('Descrizione', col.desc, y);
+    doc.text('Dare', col.dare, y, { align: 'right' }); doc.text('Avere', col.avere, y, { align: 'right' }); doc.text('Debito residuo', col.saldo, y, { align: 'right' });
+    y += 1.8; doc.setDrawColor(120); doc.line(MX, y, W - MX, y);
+    doc.setFont('helvetica', 'normal');
+    return y + 4.5;
+  };
+  let y = intestazione();
+  const riga = (data, tipo, descr, dare, avere, saldo, grassetto) => {
+    const linee = doc.splitTextToSize(descr, col.dare - 22 - col.desc).slice(0, 2);
+    const h = Math.max(4.6, linee.length * 3.6 + 1);
+    if (y + h > BOTTOM) { doc.addPage(); y = intestazione(); }
+    doc.setFont('helvetica', grassetto ? 'bold' : 'normal'); doc.setFontSize(8.2);
+    doc.text(data, col.data, y); doc.text(tipo, col.tipo, y); doc.text(linee, col.desc, y);
+    if (dare) doc.text(fmtEUR(dare), col.dare, y, { align: 'right' });
+    if (avere) doc.text(fmtEUR(avere), col.avere, y, { align: 'right' });
+    if (saldo != null) doc.text(fmtEUR(saldo), col.saldo, y, { align: 'right' });
+    y += h;
+    doc.setDrawColor(225); doc.line(MX, y - 3.2, W - MX, y - 3.2);
+  };
+  if (m.anno) riga(fmtDate(`${m.anno}-01-01`), '', 'Saldo di apertura', 0, 0, m.saldoApertura, true);
+  let totDare = 0, totAvere = 0;
+  m.righe.forEach(r => {
+    totDare += Number(r.dare) || 0; totAvere += Number(r.avere) || 0;
+    const descr = testoPdf(r.descrizione) + (r.dettaglio ? ' - ' + testoPdf(r.dettaglio).slice(0, 110) : '');
+    riga(fmtDate(r.data), r.tipo, descr, r.dare, r.avere, r.saldo, false);
+  });
+  if (!m.righe.length) riga('', '', 'Nessun movimento nel periodo', 0, 0, null, false);
+  if (y + 12 > BOTTOM) { doc.addPage(); y = intestazione(); }
+  doc.setDrawColor(120); doc.line(MX, y - 2.5, W - MX, y - 2.5);
+  y += 1.5;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(8.8);
+  doc.text('Totali del periodo', col.desc, y);
+  doc.text(fmtEUR(totDare), col.dare, y, { align: 'right' }); doc.text(fmtEUR(totAvere), col.avere, y, { align: 'right' });
+  doc.text(fmtEUR(m.saldoFinale), col.saldo, y, { align: 'right' });
+  y += 5.5;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5);
+  doc.text(`Debito residuo verso il fornitore${m.anno ? ' al 31/12/' + m.anno : ''}: € ${fmtEUR(m.saldoFinale)}`, MX, y);
+}
+// numero di pagina e data di stampa su ogni pagina, alla fine (servono le pagine totali)
+function chiudiPdfMastrini(doc) {
+  const n = doc.getNumberOfPages(), oggi = new Date().toLocaleDateString('it-IT');
+  for (let i = 1; i <= n; i++) {
+    doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(120);
+    doc.text(`Stampato il ${oggi}`, 12, 290); doc.text(`Pagina ${i} di ${n}`, 198, 290, { align: 'right' });
+    doc.setTextColor(0);
+  }
+}
+const nomeFilePdf = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+
+document.getElementById('btnPdfMastrinoFornitore').addEventListener('click', async () => {
+  const stato = document.getElementById('mastriniFornitorePdfStato');
+  const key = document.getElementById('mastriniFornitoreSel').value;
+  if (!key) { stato.textContent = 'Seleziona un fornitore.'; return; }
+  // si ricarica sempre: cosi' il PDF riflette anno e dati di questo momento
+  stato.textContent = 'Preparo il PDF...';
+  await loadMastriniFornitoreRows();
+  const m = ultimoMastrinoFornitore;
+  if (!m || m.piva !== key) { stato.textContent = 'Mastrino non disponibile, riprova.'; return; }
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  disegnaMastrinoFornitorePdf(doc, m, true);
+  chiudiPdfMastrini(doc);
+  doc.save(`mastrino-${nomeFilePdf(m.nome) || m.piva}-${m.anno || 'completo'}.pdf`);
+  stato.textContent = '';
+});
+
+document.getElementById('btnPdfMastriniTutti').addEventListener('click', async (e) => {
+  const btn = e.currentTarget, stato = document.getElementById('mastriniFornitorePdfStato');
+  const sel = document.getElementById('mastriniFornitoreSel');
+  const elenco = [...sel.options].map(o => o.value).filter(Boolean);
+  if (!elenco.length) { stato.textContent = 'Nessun fornitore in elenco.'; return; }
+  if (elenco.length > 30 && !confirm(`Preparo un PDF con ${elenco.length} mastrini: ci vuole qualche minuto. Procedo?`)) return;
+  const iniziale = sel.value;
+  btn.disabled = true;
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  let fatti = 0;
+  try {
+    // ogni mastrino si calcola con la stessa funzione della tabella (stesse regole, stesso saldo)
+    for (const key of elenco) {
+      stato.textContent = `Preparo il PDF: ${fatti + 1} di ${elenco.length}...`;
+      sel.value = key;
+      await loadMastriniFornitoreRows();
+      const m = ultimoMastrinoFornitore;
+      if (!m || m.piva !== key) continue;
+      disegnaMastrinoFornitorePdf(doc, m, fatti === 0);
+      fatti++;
+    }
+    if (!fatti) { stato.textContent = 'Nessun mastrino da stampare.'; return; }
+    chiudiPdfMastrini(doc);
+    doc.save(`mastrini-fornitori-${nomeFilePdf(AZIENDA_SCRITTURA)}-${annoSelezionato || 'completo'}.pdf`);
+    stato.textContent = `PDF pronto: ${fatti} fornitori.`;
+  } catch (err) {
+    stato.textContent = 'PDF non riuscito: ' + (err.message || err);
+  } finally {
+    btn.disabled = false;
+    sel.value = iniziale;
+    loadMastriniFornitoreRows();
+  }
+});
 async function loadMastriniFornitoreRows() {
   const meGen = ++mastriniFornitoreGen;
   const key = document.getElementById('mastriniFornitoreSel').value;
@@ -12331,6 +12459,14 @@ async function loadMastriniFornitoreRows() {
     : `${nomeFornitore} · Debito residuo verso il fornitore: € ${fmtEUR(saldo)}`);
 
   const TIPO_LABEL_MASTRINO_FORNITORE = r => r.tipo === 'fattura' ? 'Fattura' : r.tipo === 'nota_credito' ? 'Nota di credito' : r.tipo === 'apertura_conferimento' ? 'Apertura conferimento' : r.tipo === 'pagamento_apertura' ? 'Acconto apertura' : r.tipo === 'pagamento_altro' ? 'Abbuono/arrotondamento' : 'Pagamento';
+  // v488: stessi dati della tabella, in ordine cronologico, per la stampa PDF
+  ultimoMastrinoFornitore = {
+    piva: key, nome: nomeFornitore, anno: annoSelezionato || '', saldoApertura, saldoFinale: saldo,
+    righe: righeOrdSaldo.filter(r => visibili.includes(r)).map(r => ({
+      data: r.data, tipo: TIPO_LABEL_MASTRINO_FORNITORE(r), descrizione: r.descrizione,
+      dettaglio: r.dettaglio && r.dettaglio !== r.descrizione ? r.dettaglio : '', dare: r.dare, avere: r.avere, saldo: saldiRiga.get(r),
+    })),
+  };
   const columns = [
     // v268: a parita' di data si ordina per la stessa sequenza usata per il saldo progressivo, cosi' in
     // ordine decrescente la riga in cima e' davvero l'ultima e mostra il debito residuo finale
