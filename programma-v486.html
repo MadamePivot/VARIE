@@ -182,7 +182,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 485</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 486</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -3040,7 +3040,7 @@ async function caricaControlliCoerenza(sdiEsecuzioni) {
     const giorniFa = d => Math.floor((oggi - new Date(d)) / 86400000);
     const [sdiRes, fvRes] = await Promise.all([
       fetchTutteLeRighe(() => supabase.from('sdi_fatture_vendita').select('id_gestionale,documento,data_documento,cliente,totale,stato_sdi,esito,motivo,in_sospeso,id_freeinvoice').gte('data_documento', dal).order('data_documento', { ascending: false })),
-      fetchTutteLeRighe(() => supabase.from('fatture_vendita').select('id_gestionale,id_freeinvoice,numero,data,importo_totale').eq('azienda', 'Madame Pivot').gte('data', dal)),
+      fetchTutteLeRighe(() => supabase.from('fatture_vendita').select('id_gestionale,id_freeinvoice,numero,data,importo_totale').in('azienda', AZIENDE_REGISTRO.MADAME_PIVOT.letturaVendita).gte('data', dal)),
     ]);
     if (sdiRes.error) throw sdiRes.error; if (fvRes.error) throw fvRes.error;
     const sdi = sdiRes.data || [], fv = fvRes.data || [];
@@ -3066,7 +3066,9 @@ async function caricaControlliCoerenza(sdiEsecuzioni) {
     //    il 04/05/2021, la SRL ha proseguito la numerazione. Il sezionale 2 (autofatture) non c'e': sta negli acquisti e
     //    da giugno 2026 lo gestisce il commercialista.
     const { data: tutteFv, error: errNum } = await fetchTutteLeRighe(() => supabase.from('fatture_vendita')
-      .select('numero,data,sezionale').eq('azienda', 'Madame Pivot').gte('data', '2021-05-04'));
+      // v485: le vendite Madame Pivot sono scritte sia "Madame Pivot" sia "MADAME PIVOT SRL": leggendo solo la prima
+      // sembravano mancare quasi tutte le fatture dell'anno
+      .select('numero,data,sezionale').in('azienda', AZIENDE_REGISTRO.MADAME_PIVOT.letturaVendita).gte('data', '2021-05-04'));
     if (errNum) throw errNum;
     const perSerie = {};
     for (const f of (tutteFv || [])) {
