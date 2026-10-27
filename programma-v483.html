@@ -182,7 +182,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 482</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 483</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -2229,8 +2229,6 @@ function itemVisibile(it) {
   if (it.id === 'mastrinoCliente') return aziendaAttivaChiave === 'MP_SPAZIO_LAB';
   // i mastrini Mexal importati dal vecchio gestionale coprono solo Madame Pivot
   if (it.id === 'mastriniMexal' || it.id === 'fattureAperteMexal') return aziendaAttivaChiave === 'MADAME_PIVOT';
-  // v481: le gift card sono vendute sul sito Madame Pivot
-  if (it.id === 'giftCard' || it.id === 'giftFatture') return aziendaAttivaChiave === 'MADAME_PIVOT';
   return true;
 }
 
@@ -14138,6 +14136,9 @@ function htmlPagamentiFattura(f, p) {
     ${righeGest ? `<div style="margin-top:6px;"><b>Incassi registrati nel gestionale</b></div><table class="data" style="width:100%; margin-top:2px;"><tbody>${righeGest}</tbody></table>` : ''}
   </div>`;
 }
+// v483: le gift card sono di Madame Pivot: la sezione lavora sempre su fatture e movimenti Madame Pivot,
+// qualunque azienda sia scelta in alto (prima le voci sparivano con MP Spazio Lab)
+const GIFT_AZ = AZIENDE_REGISTRO.MADAME_PIVOT;
 const tipoBreve = t => ({ 'Progressivo (reso/rimborso)': 'Reso', 'Non in elenco PrestaShop': 'Manuale' })[t] || t || '';
 const descrFattura = f => f ? `${numFattura(f)} del ${fmtDate(f.data)} — ${f.cliente_denominazione || ''} (${fmtEUR(f.importo_totale)} €)` : '';
 
@@ -14303,7 +14304,7 @@ function apriCollegaGift(riga) {
     const infoC = document.getElementById('giftCandInfo');
     infoC.textContent = 'Cerco...';
     const imp = Number(document.getElementById('giftImporto').value) || 0;
-    let q = supabase.from('fatture_vendita').select('id,numero,sezionale,data,tipo_documento,cliente_denominazione,importo_totale').in('azienda', AZIENDE_LETTURA_VENDITA);
+    let q = supabase.from('fatture_vendita').select('id,numero,sezionale,data,tipo_documento,cliente_denominazione,importo_totale').in('azienda', GIFT_AZ.letturaVendita);
     const dataRif = document.getElementById('giftDataUso').value;
     // filtri sulle colonne: sezionale, anno, numero fattura, cliente, totale (si combinano tra loro)
     const fSez = document.getElementById('giftFSez').value;
@@ -14391,7 +14392,7 @@ async function salvaCollegamentoGift(r, manuale, fattura, btn) {
   try {
     if (document.getElementById('giftRegistraIncasso').checked) {
       const { data: mov, error } = await supabase.from('movimenti_bancari').insert({
-        azienda: AZIENDA_SCRITTURA, banca: 'Gift card (non bancario)', data_operazione: dataUso, categoria: 'GIFT CARD UTILIZZO',
+        azienda: GIFT_AZ.scrittura, banca: 'Gift card (non bancario)', data_operazione: dataUso, categoria: 'GIFT CARD UTILIZZO',
         descrizione: `Pagamento con gift card ${codice} fatt. ${numFattura(fattura)} ${fattura.cliente_denominazione || ''}${ordineUso ? ` (ordine ${ordineUso})` : ''} [non bancario]`,
         avere: importo, riconciliato: true, riga_hash: 'gift-' + crypto.randomUUID(),
       }).select('id').single();
@@ -14417,7 +14418,7 @@ async function salvaCollegamentoGift(r, manuale, fattura, btn) {
       ordine_acquisto: (manuale ? val('giftOrdAcq') : r.ordineAcquisto) || null, rif_ordine_acquisto: rifAcq || null,
       pagamento_acquisto: (manuale ? val('giftPagAcq') : r.pagamento) || null, totale_pagato_acquisto: manuale ? null : numOrNull(r.totalePagato),
       fattura_numero: numFattura(fattura), fattura_data: fattura.data, fattura_cliente: fattura.cliente_denominazione || null,
-      azienda: AZIENDA_SCRITTURA, fonte: manuale ? 'manuale' : 'PrestaShop (pagina GIFT)',
+      azienda: GIFT_AZ.scrittura, fonte: manuale ? 'manuale' : 'PrestaShop (pagina GIFT)',
     });
     if (e3) throw e3;
     chiudiModaleGift();
