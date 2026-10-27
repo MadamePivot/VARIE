@@ -182,7 +182,7 @@
     <button type="button" id="sidebarToggleBtn" title="Mostra/nascondi il menu" style="background:none; border:1px solid #556; color:#fff; border-radius:5px; padding:6px 10px; font-size:15px; cursor:pointer; line-height:1; align-self:center;">&#9776;</button>
     <div>
       <h1 id="headerAziendaNome">Contabilita &mdash; MP Spazio Lab SRL</h1>
-      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 484</span></div>
+      <div class="subtitle">Fatture acquisto/vendita, estratto conto bancario e mastrini &middot; dati su Supabase &middot; <span id="appVersione" style="opacity:0.7;" title="Sale ad ogni modifica del codice: se dopo Cmd+R il numero non e' cambiato, la pagina non si e' ricaricata davvero">versione 485</span></div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -2769,7 +2769,7 @@ const COLLEGAMENTI = [
   { id: 'viva_vendite', nome: 'Viva.com — vendite', servizio: 'Viva vendite', funzione: 'viva-transazioni', come: 'API vendite Viva: liquidazioni e commissioni (non vede acquisti carta, rimborsi, cashback, giroconti).', banca: 'Viva.com', filtroDescr: 'Liquidazione vendite%' },
   { id: 'viva_webhook', nome: 'Viva.com — movimenti conto', servizio: 'Viva webhook', funzione: 'viva-webhook', come: 'Viva avvisa il webhook a ogni movimento di wallet; un automatismo lo trasforma in movimento (acquisti carta, rimborsi, cashback, giroconti).', banca: 'Viva.com', fileName: 'viva-webhook' },
   { id: 'mypos', nome: 'myPOS', servizio: 'myPOS', funzione: 'mypos-transazioni', come: 'API myPOS: movimenti POS, commissioni e giroconti, registrati direttamente. "Aggiorna" in Panoramica oppure in automatico due volte al giorno.', banca: 'MyPOS' },
-  // v384: i robot che girano fuori dal programma (GitHub Actions) - non si lanciano da qui, il tasto porta alla pagina Actions
+  // v384: i robot che girano fuori dal programma (GitHub Actions); v485: si lanciano da qui con "Prova/Invia/Lancia ora" (funzione lancia-robot)
   { id: 'robot_sdi', robot: 'sdi', nome: 'Robot SDI — invio fatture vendita', servizio: 'Robot SDI', come: 'Ogni notte entra nel gestionale, controlla le fatture "Non elaborata", le invia allo SDI (tetto per esecuzione) e le scrive nel programma. In modalita\' prova controlla soltanto.' },
   { id: 'robot_freeinvoice', robot: 'freeinvoice', nome: 'Freeinvoice — XML fatture vendita', servizio: 'Freeinvoice', come: 'Il robot importa nel programma gli XML delle fatture emesse da Freeinvoice (salta i doppioni per numero e data).' },
   // email "reverse charge" su madamepivot@gmail.com: il Postino (Apps Script, ogni giorno verso le 8) manda i PDF alla funzione ricevi-reverse-charge-email,
@@ -2820,6 +2820,34 @@ async function chiamaFunzioneConLog(c, body) {
   const descr = ok ? (messaggioStato || `dal ${body.dal} al ${body.al}: ${contaRisultatoApi(data) || 'risposta ricevuta'}`) : dettaglio;
   await logChiamata(c.servizio, 'manuale', ok ? 'ok' : 'errore', Date.now() - t0, descr);
   return { ok, descr };
+}
+
+// v485: i robot su GitHub Actions si lanciano dal programma tramite la funzione lancia-robot (il token GitHub sta
+// nei secrets di Supabase, non nel programma); l'esito arriva come sempre nelle tabelle dei robot e qui nel log
+async function lanciaRobot(btn) {
+  const [robot, opzione] = btn.dataset.lanciaRobot.split('|');
+  const st = document.getElementById('collegamentiStatus');
+  const body = robot === 'sdi' ? { azione: 'lancia', robot, modalita: opzione } : { azione: 'lancia', robot, giorni: Number(opzione) };
+  const nome = robot === 'sdi' ? `Robot SDI (${opzione})` : 'Robot Freeinvoice';
+  if (robot === 'sdi' && opzione === 'invia' && !confirm('Lanciare ora il Robot SDI in modalita\' INVIA?\nLe fatture "Non elaborata" del gestionale verranno inviate davvero allo SDI.')) return;
+  btn.disabled = true;
+  st.textContent = `${nome}: avvio in corso...`;
+  try {
+    const { data, error } = await supabase.functions.invoke('lancia-robot', { body });
+    if (error) throw new Error(await messaggioErroreInvio(error));
+    if (!data || !data.ok) throw new Error((data && data.error) || 'risposta non valida');
+    st.textContent = `${nome}: avviato. Ci mette qualche minuto; poi premi "Aggiorna stato" per vedere l'esito.`;
+    // dopo qualche secondo si legge da GitHub se l'esecuzione e' partita davvero
+    setTimeout(async () => {
+      try {
+        const { data: s2 } = await supabase.functions.invoke('lancia-robot', { body: { azione: 'stato' } });
+        const ultima = s2 && s2.ok && Array.isArray(s2.robot[robot]) ? s2.robot[robot][0] : null;
+        if (ultima) st.innerHTML = `${escHtml(nome)}: ${ultima.stato === 'completed' ? 'terminato (' + escHtml(ultima.esito || '') + ')' : ultima.stato === 'in_progress' ? 'in esecuzione' : 'in coda'} · avviato ${escHtml(fmtDataOra(ultima.avviato))} · <a href="${escHtml(ultima.link)}" target="_blank" rel="noopener">dettagli su GitHub</a>`;
+      } catch (e) { /* lo stato e' solo un aiuto */ }
+    }, 8000);
+  } catch (e) {
+    st.textContent = `${nome}: avvio non riuscito - ${e.message || e}`;
+  } finally { btn.disabled = false; }
 }
 
 async function eseguiCollegamento(id) {
@@ -2944,12 +2972,15 @@ async function loadCollegamenti(mantieniMessaggio) {
       <td>${r.ultimaData ? fmtDate(r.ultimaData) : '—'}</td>
       <td style="white-space:normal; font-size:12px;">${r.ultima ? escHtml(fmtDataOra(r.ultima.ts || r.ultima.ricevuto_il)) : '—'}${r.ultima && (r.ultima.dettaglio) ? `<div class="muted">${escHtml(r.ultima.dettaglio)}</div>` : ''}</td>
       <td>${badgeCollegamento(r.stato)}</td>
-      <td>${r.c.rc ? `<button class="btn secondary" data-apri-reverse-charge title="Apre la pagina Reverse charge con le fatture caricate">Apri Reverse charge</button>` : r.c.robot ? `<a class="btn secondary" href="${ROBOT_ACTIONS_URL}" target="_blank" rel="noopener" title="Il robot gira su GitHub: da li' si lancia a mano">Apri GitHub</a>` : `<button class="btn secondary" data-esegui-collegamento="${r.c.id}">${r.c.id === 'viva_webhook' ? 'Verifica ora' : 'Esegui ora'}</button>`}</td>
+      <td>${r.c.rc ? `<button class="btn secondary" data-apri-reverse-charge title="Apre la pagina Reverse charge con le fatture caricate">Apri Reverse charge</button>` : r.c.robot ? `<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">${r.c.robot === 'sdi'
+        ? `<button class="btn secondary" data-lancia-robot="sdi|prova" title="Il robot controlla le fatture ma non invia nulla">Prova ora</button><button class="btn" data-lancia-robot="sdi|invia" title="Il robot invia davvero le fatture allo SDI">Invia ora</button>`
+        : `<button class="btn" data-lancia-robot="freeinvoice|7" title="Scarica e importa gli XML delle fatture degli ultimi 7 giorni">Lancia ora</button>`}<a href="${ROBOT_ACTIONS_URL}" target="_blank" rel="noopener" class="muted" style="font-size:11px;" title="Pagina del robot su GitHub (esecuzioni e dettagli)">GitHub</a></div>` : `<button class="btn secondary" data-esegui-collegamento="${r.c.id}">${r.c.id === 'viva_webhook' ? 'Verifica ora' : 'Esegui ora'}</button>`}</td>
     </tr>`).join('') + '</tbody></table>';
   document.querySelectorAll('[data-apri-reverse-charge]').forEach(b => b.addEventListener('click', () => activateTab('reverseCharge')));
   document.querySelectorAll('[data-esegui-collegamento]').forEach(b => b.addEventListener('click', async () => {
     b.disabled = true; try { await eseguiCollegamento(b.dataset.eseguiCollegamento); } finally { b.disabled = false; }
   }));
+  document.querySelectorAll('[data-lancia-robot]').forEach(b => b.addEventListener('click', () => lanciaRobot(b)));
 
   caricaControlliCoerenza(sdiEsecuzioni);
 
