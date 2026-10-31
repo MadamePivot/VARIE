@@ -358,7 +358,10 @@
     for(let i=1;i<righe.length;i++){
       const sopra=piatto(righe[i-1]).replace(/\bn(?:r|um)?\.?\s*pag\w*|pagina|pag\./g,' ');
       if(!/numero|umero|\bnr\b|\bn\b|n°|ocumento/.test(sopra) || !/\bdata\b|ata\s+doc/.test(sopra)) continue;
-      const d=dateIn(righe[i])[0]; if(!d) continue;
+      // i valori possono stare una o due righe sotto (es. una riga "Pag." in mezzo)
+      let d=null;
+      for(let k=0;k<3 && i+k<righe.length;k++){ d=dateIn(righe[i+k])[0]; if(d){ i+=k; break; } }
+      if(!d) continue;
       const prima=righe[i].slice(0,d.index).split(/[\s|\[\]]+/).filter(Boolean);
       const dopo=righe[i].slice(d.index+d.raw.length).split(/[\s|\[\]]+/).filter(Boolean);
       const ok=x=>x && /\d/.test(x) && x.replace(/\D/g,'').length<=9 && !/^\d{1,2}[\/.:]\d{1,2}$/.test(x);
