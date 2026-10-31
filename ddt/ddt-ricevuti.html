@@ -223,7 +223,7 @@
   const BUCKET = 'ddt-ricevuti';
   const FUNZIONE = 'ddt-ricevuti';
   // VERSIONE DEL PROGRAMMA: si vede in alto e resta registrata su ogni DDT letto
-  const VERSIONE = 'v2';
+  const VERSIONE = 'v3';
   const VERSIONE_DATA = '31/10/2026';
   const AZ = { 'MADAME PIVOT SRL':'MP', 'MP SPAZIO LAB SRL':'LAB' };
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -766,11 +766,27 @@
 
   /* ---------------- caricamento file ---------------- */
   const ACCETTATI=/\.(pdf|jpe?g|png|webp)$/i;
-  async function caricaFile(files){
-    files=[...files].filter(f=>ACCETTATI.test(f.name));
-    if(!files.length){ toast('Nessun PDF o immagine da caricare'); return; }
+  // copio subito in memoria il contenuto dei file: se arrivano da un allegato email o da una cartella
+  // in cloud il browser puo' perderne l'accesso pochi istanti dopo il trascinamento
+  function copiaInMemoria(f){
+    return f.arrayBuffer().then(b=>new File([b], f.name, {type:f.type||''})).catch(e=>({ nome:f.name, errore:e }));
+  }
+  function caricaFile(fileList){
+    const scelti=[...fileList].filter(f=>ACCETTATI.test(f.name));
+    if(!scelti.length){ toast('Nessun PDF o immagine da caricare'); return; }
+    const copie=scelti.map(copiaInMemoria);   // partono tutte subito, prima di qualsiasi altra attesa
+    return caricaCopie(copie);
+  }
+  async function caricaCopie(copie){
     const p=$('progress'), log=$('prog-log'); p.style.display='block'; log.innerHTML='';
+    const riga0=(t,cls='')=>{ const li=document.createElement('li'); li.textContent=t; if(cls) li.className=cls; log.prepend(li); };
+    const files=[];
+    for(const c of await Promise.all(copie)){
+      if(c instanceof File) files.push(c);
+      else riga0(`${c.nome}: il file non si può leggere. Salvalo prima sul computer (es. nella cartella Download) e poi trascinalo da lì: dagli allegati email o dalle cartelle in cloud a volte non funziona.`,'danger');
+    }
     let fatti=0; const tot=files.length, daLeggere=[];
+    if(!tot){ $('prog-text').textContent='Nessun file caricato.'; $('prog-bar').style.width='0%'; return; }
     const passo=(msg)=>{ $('prog-text').textContent=msg; $('prog-bar').style.width=Math.round(fatti/tot*100)+'%'; };
     const riga=(t,cls='')=>{ const li=document.createElement('li'); li.textContent=t; if(cls) li.className=cls; log.prepend(li); };
     for(const f of files){
