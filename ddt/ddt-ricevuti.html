@@ -382,6 +382,23 @@
     return null;
   }
 
+  // ---- "firma" del modulo di un fornitore: parole tipiche che non cambiano da un DDT all'altro
+  const COMUNI=new Set(('trasporto documento documenti destinatario destinazione diverso madame pivot spazio crocifisso ripoli bellini '+
+    'pontassieve sieci bagno vendita visibile colli conducente vettore vettori ritiro annotazioni pagamento banca appoggio lucca tirreno '+
+    'ordine riferimento articolo descrizione colore taglie prezzo porto lordo netto inizio firma causale aspetto esteriore agente codice '+
+    'fiscale partita anagrafico italia totale quantita spett cliente fornitore merce data pagina numero luogo mezzo cessionario cedente '+
+    'mittente scatole cartoni vista assegnato franco consegna ritiri sconti sconto importo valuta magazzino principale unita misura').split(' '));
+  function paroleFirma(testo){
+    const w=soloParole(testo).split(' ').filter(x=>x.length>=5 && !COMUNI.has(x));
+    return [...new Set(w)];
+  }
+  function firmaCorrisponde(testo, firma){
+    if(!Array.isArray(firma) || firma.length<3) return 0;
+    const presenti=new Set(paroleFirma(testo));
+    const n=firma.filter(x=>presenti.has(x)).length;
+    return (n>=3 && n/firma.length>=0.4) ? n/firma.length : 0;
+  }
+
   // ---- regole generiche
   function numeroGenerico(testo){
     const re=/(?:d\.?\s?d\.?\s?t\.?|documento\s+di\s+trasporto|doc\.?\s*di\s*trasp\w*|bolla(?:\s+di\s+consegna)?|n(?:umero|r)?\.?\s*doc(?:umento)?\.?)[\s|:.'‘’"]*(?:n(?:r|um(?:ero)?)?\.?\s*|n[°º]\s*)?[\s|:.'‘’"]*([A-Z]{0,4}[\s\/\-]?\d[\w\/\-]{0,15})/i;
@@ -430,10 +447,18 @@
     const noti=new Map(ctx.fornitori.filter(f=>f.piva).map(f=>[String(f.piva).replace(/\D/g,'').slice(-11), f]));
     const altre=pive.filter(p=>!NOSTRE[p.piva]);
     let forn=altre.map(p=>noti.get(p.piva)).find(Boolean) || null;
+    // firma imparata (per i DDT dove nome e P.IVA del fornitore sono solo nel logo)
+    if(!forn && !altre.length){
+      let best=null;
+      for(const m of Object.values(ctx.modelli)){ const sc=firmaCorrisponde(t, m.firma); if(sc && (!best || sc>best.sc)) best={sc,m}; }
+      if(best) forn={ piva:best.m.fornitore_piva, nome:best.m.fornitore_denominazione };
+    }
     if(!forn){
       let best=null;
       const VUOTE=['srl','spa','sas','snc','srls','societa','soc','della','delle','dello','italia','group','calzature','pelli','pellami','accessori','commerciale','industria'];
       for(const f of ctx.fornitori){
+        // le nostre aziende compaiono come destinatario o destinazione: dal solo nome non sono il fornitore
+        if(NOSTRE[String(f.piva||'').replace(/\D/g,'').slice(-11)] || /madame\s*pivot|spazio\s*lab/i.test(f.nome||'')) continue;
         const parole=soloParole(f.nome).split(' ').filter(w=>w.length>=3 && !['di','del','dei','e','c','s','a'].includes(w));
         for(let k=0;k<parole.length-1;k++){
           const [a,b]=[parole[k],parole[k+1]];
@@ -507,6 +532,12 @@
     return r;
   }
 
+  function unisciFirma(vecchia, nuove){
+    let v=vecchia; if(typeof v==='string'){ try{ v=JSON.parse(v); }catch{ v=null; } }
+    if(!Array.isArray(v) || !v.length) return nuove.slice(0,40);
+    const comuni=v.filter(x=>nuove.includes(x));
+    return (comuni.length>=3 ? comuni : nuove).slice(0,40);
+  }
   // dopo la conferma: impara dove questo fornitore scrive numero e data
   function imparaModello(testo, d, vecchio){
     if(!d.fornitore_piva || !testo) return null;
@@ -523,6 +554,8 @@
       ancora_numero: an ? JSON.stringify(an) : (vecchio?.ancora_numero ?? null),
       ancora_data: ad ? JSON.stringify(ad) : (vecchio?.ancora_data ?? null),
       azienda_predefinita: d.azienda || vecchio?.azienda_predefinita || null,
+      // firma: parole del modulo, unite a quelle gia' imparate e tenute solo se ricorrono
+      firma: JSON.stringify(unisciFirma(vecchio?.firma, paroleFirma(t))),
       esempi: (vecchio?.esempi||0)+1,
       aggiornato_il: new Date().toISOString(),
     };
@@ -594,7 +627,7 @@
     }
     return await ocr(blob);
   }
-  function modelloLetto(m){ const j=v=>{ try{ return v? JSON.parse(v):null; }catch{ return null; } }; return {...m, ancora_numero:j(m.ancora_numero), ancora_data:j(m.ancora_data)}; }
+  function modelloLetto(m){ const j=v=>{ try{ return v? JSON.parse(v):null; }catch{ return null; } }; return {...m, ancora_numero:j(m.ancora_numero), ancora_data:j(m.ancora_data), firma:j(m.firma)}; }
   function contesto(){
     const f=new Map(), add=(piva,nome)=>{ if(!piva && !nome) return; const k=piva? String(piva).replace(/\D/g,'').slice(-11) : nome; if(!f.has(k) || (nome && !f.get(k).nome)) f.set(k,{piva:piva?k:null,nome}); };
     for(const a of attesi) add(a.fornitore_piva, a.fornitore_denominazione);
