@@ -61,3 +61,16 @@ export function estraiRiferimentiDdt(testo, annoFattura){
   }
   return out;
 }
+
+// Fatture differite (TD24): una riga fatta solo di "numero del data" e' il riferimento al DDT,
+// anche senza la parola DDT (es. Solettificio Terry "696/   Del:05-08-2026", Punto Fibbia "1088/61 Del:18-05-2026").
+const RIGA_SEMPLICE = /^\s*([A-Za-z0-9][A-Za-z0-9\/\-.]{0,15}?)\s*\/?\s*(?:del|dd|data)\s*[:.]?\s*(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\s*$/i;
+export function riferimentoRigaSemplice(testo){
+  const m=RIGA_SEMPLICE.exec(String(testo||''));
+  if(!m || !/\d/.test(m[1])) return null;
+  let y=+m[4]; if(y<100) y+=2000;
+  const mo=+m[3], d=+m[2];
+  if(!(mo>=1&&mo<=12&&d>=1&&d<=31)) return null;
+  const numero=m[1].replace(/[\/\-.]+$/,'');
+  return { numero, numero_chiave:chiaveNumero(numero), data:`${y}-${pad(mo)}-${pad(d)}`, nostro:false, testo:String(testo).trim() };
+}

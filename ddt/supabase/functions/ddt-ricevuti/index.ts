@@ -16,7 +16,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 // @ts-ignore: modulo JS
-import { estraiRiferimentiDdt } from "./ddt_parser.js";
+import { estraiRiferimentiDdt, riferimentoRigaSemplice } from "./ddt_parser.js";
 
 const BUCKET = "ddt-ricevuti";
 const MAX_BYTES = 20 * 1024 * 1024;
@@ -59,21 +59,26 @@ const FILTRO_RIGHE = "descrizione.ilike.%ddt%,descrizione.ilike.%d.d.t%,descrizi
 async function aggiornaAttesi() {
   // deno-lint-ignore no-explicit-any
   const righe: any[] = [];
-  for (let da = 0; ; da += 1000) {
-    const { data, error } = await sb.from("righe_fattura")
-      .select("descrizione, fattura:fatture!inner(id, numero, data, azienda, tipo_documento, fornitore_denominazione, fornitore_piva)")
-      .gte("fattura.data", DAL)
-      .or(FILTRO_RIGHE)
-      .order("id").range(da, da + 999);
-    if (error) throw new Error("lettura fatture: " + error.message);
-    righe.push(...(data || []));
-    if (!data || data.length < 1000) break;
+  const viste = new Set<string>();
+  const SELECT = "id, descrizione, fattura:fatture!inner(id, numero, data, azienda, tipo_documento, fornitore_denominazione, fornitore_piva)";
+  // 1) righe con DDT/bolla/trasporto; 2) nelle fatture differite (TD24) anche le righe "numero del data"
+  for (const filtro of [FILTRO_RIGHE, "descrizione.ilike.%del%,descrizione.ilike.%dd%,descrizione.ilike.%data%"]) {
+    for (let da = 0; ; da += 1000) {
+      let q = sb.from("righe_fattura").select(SELECT).gte("fattura.data", DAL).or(filtro);
+      if (filtro !== FILTRO_RIGHE) q = q.eq("fattura.tipo_documento", "TD24");
+      const { data, error } = await q.order("id").range(da, da + 999);
+      if (error) throw new Error("lettura fatture: " + error.message);
+      for (const r of data || []) if (!viste.has(r.id)) { viste.add(r.id); righe.push(r); }
+      if (!data || data.length < 1000) break;
+    }
   }
   const nuovi = new Map<string, Record<string, unknown>>();
   for (const r of righe) {
     const f = r.fattura;
     if (!f || TIPI_ESCLUSI.includes(f.tipo_documento)) continue;
-    for (const x of estraiRiferimentiDdt(r.descrizione, Number(String(f.data).slice(0, 4)))) {
+    let trovati = estraiRiferimentiDdt(r.descrizione, Number(String(f.data).slice(0, 4)));
+    if (!trovati.length && f.tipo_documento === "TD24") { const x = riferimentoRigaSemplice(r.descrizione); if (x) trovati = [x]; }
+    for (const x of trovati) {
       const chiave = `${f.id}|${x.numero_chiave}|${x.data || ""}`;
       if (nuovi.has(chiave)) continue;
       nuovi.set(chiave, {
