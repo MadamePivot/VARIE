@@ -3,7 +3,7 @@
  *
  * Cosa fa, da solo, ogni 10 minuti:
  *  1. cerca le email con "DDT" nell'oggetto e un allegato (PDF o foto) non ancora lavorate;
- *  2. manda ogni allegato al programma DDT, che lo legge con l'AI e lo mette in "Da confermare";
+ *  2. manda ogni allegato al programma DDT (lo legge alla prossima apertura e lo mette in "Da confermare");
  *  3. mette all'email l'etichetta "DDT da protocollare";
  *  4. quando tutti i DDT di quell'email sono stati protocollati nel programma,
  *     sposta l'email sull'etichetta "DDT protocollato".

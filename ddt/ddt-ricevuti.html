@@ -142,7 +142,7 @@
       <div class="ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m6 10 6-6 6 6"/><path d="M4 20h16"/></svg></div>
       <div>
         <strong>Trascina qui i DDT (anche tanti insieme)</strong>
-        <span>PDF, scansioni o foto JPG/PNG · li leggo io e ti propongo i dati da confermare</span>
+        <span>PDF, scansioni o foto JPG/PNG · li leggo io (gratis) e ti propongo i dati da confermare</span>
       </div>
       <div class="acts">
         <button class="btn btn-ghost btn-sm" id="btn-file" type="button">Scegli file</button>
@@ -197,7 +197,7 @@
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   const $ = id => document.getElementById(id);
 
-  let coda = [], archivio = [], attesi = [], filtroAz = '', filtroStato = 'aperti', primoAggiornamento = false;
+  let coda = [], archivio = [], attesi = [], modelli = {}, fornitoriFatture = [], inLettura = new Set(), filtroAz = '', filtroStato = 'aperti', primoAggiornamento = false;
 
   /* ---------------- utilità ---------------- */
   function esc(s){ const d=document.createElement('div'); d.textContent=s??''; return d.innerHTML; }
@@ -231,7 +231,294 @@
     coda=q||[]; archivio=a||[];
     renderCoda(); renderArchivio();
     $('t-coda').textContent=coda.length;
-    caricaAttesi();
+    const [{ data:mod }, { data:forn }] = await Promise.all([ supabase.from('ddt_modelli').select('*'), supabase.rpc('ddt_elenco_fornitori') ]);
+    modelli={}; for(const m of mod||[]) modelli[m.fornitore_piva]=m;
+    fornitoriFatture=forn||[];
+    await caricaAttesi();
+    leggiInAttesa();
+  }
+
+  /* ---------------- lettura gratuita (testo del PDF o OCR) ---------------- */
+  // <lettore> ======================================================================
+  // Lettura gratuita dei DDT: dal testo del documento ricava azienda, fornitore, numero e data.
+  // 1) DDT attesi dalle fatture: se nel testo c'e' il numero (e la data) di un DDT atteso di quel fornitore, e' lui.
+  // 2) Modello imparato per il fornitore: le parole che precedono numero e data (o l'intestazione della colonna).
+  // 3) Regole generiche ("DDT n. 123 del 12/10/2026", "Numero documento", "Data").
+  const NOSTRE = { '07096860486':'MADAME PIVOT SRL', '07376920489':'MP SPAZIO LAB SRL' };
+  const RE_DATA = /(?<![\d\/.\-])(?:(\d{4})-(\d{1,2})-(\d{1,2})|(\d{1,2})\s?[\/.\-]\s?(\d{1,2})\s?[\/.\-]\s?(\d{4}|\d{2}))(?![\d\/])/g;
+  const pad2 = n => String(n).padStart(2,'0');
+  const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  const piatto = s => String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+  const soloParole = s => piatto(s).replace(/[^a-z°º]+/g,' ').trim();
+
+  function dateIn(testo){
+    const out=[]; RE_DATA.lastIndex=0; let m;
+    while((m=RE_DATA.exec(testo))){
+      let y,mo,d; if(m[1]){y=+m[1];mo=+m[2];d=+m[3];} else {d=+m[4];mo=+m[5];y=+m[6]; if(y<100) y+=2000;}
+      if(mo>=1&&mo<=12&&d>=1&&d<=31&&y>=2015&&y<=2100) out.push({iso:`${y}-${pad2(mo)}-${pad2(d)}`, index:m.index, raw:m[0]});
+    }
+    return out;
+  }
+  function piveIn(testo){
+    const out=[]; const re=/(?<![\d])(?:it\s?)?((?:\d\s?){10}\d)(?![\d])/gi; let m;
+    while((m=re.exec(testo))){ const p=m[1].replace(/\s/g,''); if(p.length===11) out.push({piva:p, index:m.index}); }
+    return out;
+  }
+  // posizione del numero DDT nel testo, tollerando le piccole differenze dell'OCR
+  // ("1.331/V" trovato anche come "1.331V" o "1331/V"; "00669" anche come "669")
+  function posNumero(testo, numero){
+    const c=String(numero||'').replace(/[^A-Za-z0-9]/g,'').replace(/^0+(?=\d)/,'');
+    if(!c) return -1;
+    const re=new RegExp('(?<![A-Za-z0-9])0*'+[...c].map(reEsc).join('[\\s.\\/\\-]?')+'(?![A-Za-z0-9])','i');
+    const m=re.exec(testo); return m? m.index : -1;
+  }
+  const chiave = n => { const m=String(n||'').toLowerCase().replace(/(\d)\.(?=\d)/g,'$1').match(/(\d+)([a-z]?)/); return m? String(parseInt(m[1],10))+m[2] : ''; };
+
+  // ---- ancore imparate
+  // {t:'riga', parole:'n doc'}               valore sulla stessa riga, dopo queste parole
+  // {t:'sotto', etichetta:'numero data pag', col:0}  valore nella riga sotto l'intestazione, colonna col
+  function ancoraPer(testo, pos){
+    if(pos<0) return null;
+    const inizioRiga=testo.lastIndexOf('\n',pos-1)+1;
+    // parole dopo l'ultimo valore numerico che precede (es. "DDT n. 455/A del " -> "del")
+    const tok=testo.slice(inizioRiga,pos).trim().split(/\s+/).filter(Boolean);
+    let k=tok.length; while(k>0 && !/\d/.test(tok[k-1])) k--;
+    const prima=soloParole(tok.slice(k).join(' ')).split(' ').filter(Boolean);
+    if(prima.length) return { t:'riga', parole:prima.slice(-3).join(' ') };
+    // valore a inizio riga: cerco l'intestazione nella riga sopra
+    const fineSopra=inizioRiga-1; if(fineSopra<=0) return null;
+    const sopra=testo.slice(testo.lastIndexOf('\n',fineSopra-1)+1, fineSopra);
+    const et=soloParole(sopra); if(!et) return null;
+    const rigaVal=testo.slice(inizioRiga, (testo.indexOf('\n',pos)+1||testo.length+1)-1);
+    const col=rigaVal.slice(0,pos-inizioRiga).trim().split(/\s+/).filter(Boolean).length;
+    return { t:'sotto', etichetta:et.slice(0,60), col };
+  }
+  function valoreDaAncora(testo, a, tipo){
+    if(!a) return null;
+    if(a.t==='riga'){
+      const re=new RegExp(a.parole.split(' ').map(reEsc).join('[^a-z0-9°º\\n]*')+'[^a-z0-9\\n]{0,12}','gi');
+      const tp=piatto(testo); let m;
+      while((m=re.exec(tp))){
+        const dopo=testo.slice(m.index+m[0].length, m.index+m[0].length+40);
+        const v=tipo==='data'? (dateIn(dopo)[0]||{}).iso : (dopo.match(/^\s*([A-Za-z]{0,4}[\s\/\-]?\d[\w\/\-.]{0,18})/)||[])[1];
+        if(v) return tipo==='data'? v : v.replace(/[.\-\/]+$/,'').trim();
+      }
+      return null;
+    }
+    if(a.t==='sotto'){
+      const righe=testo.split('\n');
+      for(let i=0;i<righe.length-1;i++){
+        if(!soloParole(righe[i]).includes(a.etichetta.slice(0,20))) continue;
+        const tok=righe[i+1].trim().split(/\s+/);
+        if(tipo==='data'){ const d=dateIn(tok.slice(a.col).join(' '))[0]; if(d) return d.iso; }
+        else if(tok[a.col] && /\d/.test(tok[a.col])) return tok[a.col].replace(/[.\-\/]+$/,'');
+      }
+    }
+    return null;
+  }
+
+  // ---- regole generiche
+  function numeroGenerico(testo){
+    const re=/(?:d\.?\s?d\.?\s?t\.?|documento\s+di\s+trasporto|doc\.?\s*di\s*trasp\w*|bolla(?:\s+di\s+consegna)?|n(?:umero|r)?\.?\s*doc(?:umento)?\.?)\s*(?:n(?:r|um(?:ero)?)?\.?\s*|n[°º]\s*)?[:.]?\s*([A-Z]{0,4}[\s\/\-]?\d[\w\/\-]{0,15})/i;
+    const m=re.exec(testo); if(!m) return null;
+    return { numero:m[1].replace(/[.\-\/]+$/,'').trim(), index:m.index+m[0].length };
+  }
+  function dataGenerica(testo, vicinoA){
+    const tutte=dateIn(testo); if(!tutte.length) return null;
+    if(vicinoA!=null){ const v=tutte.find(d=>d.index>=vicinoA-5 && d.index-vicinoA<80); if(v) return v.iso; }
+    const re=/\bdata\b[^\n\d]{0,25}/gi; let m;
+    while((m=re.exec(testo))){ const d=tutte.find(x=>x.index>=m.index && x.index-m.index<45); if(d) return d.iso; }
+    return tutte[0].iso;
+  }
+
+  /**
+   * ctx = { fornitori:[{piva,nome}], modelli:{piva:modello}, attesi:[{fornitore_piva,fornitore_denominazione,numero_ddt,data_ddt,azienda,aperto}] }
+   */
+  function interpretaDdt(testo, ctx){
+    const t=String(testo||''); const tp=piatto(t);
+    const r={ azienda:null, fornitore_piva:null, fornitore_denominazione:null, numero_ddt:null, data_ddt:null, avvisi:[], fonte:null };
+    if(t.replace(/\s/g,'').length<20){ r.avvisi.push('Nel file non ho trovato testo leggibile: compila i dati a mano.'); return r; }
+
+    // aziende nostre presenti
+    const pive=piveIn(t);
+    const nostre=[...new Set(pive.filter(p=>NOSTRE[p.piva]).map(p=>NOSTRE[p.piva]))];
+    if(!nostre.length){
+      if(/madame\s*pivot/.test(tp)) nostre.push('MADAME PIVOT SRL');
+      if(/spazio\s*lab/.test(tp)) nostre.push('MP SPAZIO LAB SRL');
+    }
+
+    // fornitore: prima P.IVA non nostra che conosciamo, poi per nome, poi prima P.IVA sconosciuta
+    const noti=new Map(ctx.fornitori.filter(f=>f.piva).map(f=>[String(f.piva).replace(/\D/g,'').slice(-11), f]));
+    const altre=pive.filter(p=>!NOSTRE[p.piva]);
+    let forn=altre.map(p=>noti.get(p.piva)).find(Boolean) || null;
+    if(!forn){
+      let best=null;
+      for(const f of ctx.fornitori){
+        const parole=soloParole(f.nome).split(' ').filter(w=>w.length>=3 && !['srl','spa','sas','snc','srls','societa','di','del','della'].includes(w)).slice(0,2);
+        if(!parole.length || parole.join('').length<5) continue;
+        const i=tp.search(new RegExp('\\b'+parole.map(reEsc).join('\\W+')+'\\b'));
+        if(i>=0 && (!best || i<best.i)) best={i,f};
+      }
+      forn=best?.f||null;
+    }
+    if(forn){ r.fornitore_piva=forn.piva?String(forn.piva).replace(/\D/g,'').slice(-11):null; r.fornitore_denominazione=forn.nome; }
+    else if(altre[0]){ r.fornitore_piva=altre[0].piva; r.avvisi.push('Fornitore nuovo: scrivi il nome, dalla prossima volta lo riconosco.'); }
+    else r.avvisi.push('Fornitore non riconosciuto.');
+
+    const stesso = a => (r.fornitore_piva && String(a.fornitore_piva||'').replace(/\D/g,'').endsWith(r.fornitore_piva))
+                     || (!r.fornitore_piva && r.fornitore_denominazione && a.fornitore_denominazione===r.fornitore_denominazione);
+    const modello = r.fornitore_piva ? ctx.modelli[r.fornitore_piva] : null;
+
+    // 1) DDT attesi di questo fornitore presenti nel testo
+    const date=new Set(dateIn(t).map(d=>d.iso));
+    const candidati=ctx.attesi.filter(a=>a.aperto && stesso(a) && posNumero(t,a.numero_ddt)>=0)
+      .map(a=>({a, conData: a.data_ddt && date.has(a.data_ddt)}))
+      .sort((x,y)=>(y.conData?1:0)-(x.conData?1:0));
+    if(candidati.length && (candidati[0].conData || !candidati[0].a.data_ddt)){
+      const a=candidati[0].a;
+      r.numero_ddt=a.numero_ddt; r.data_ddt=a.data_ddt; r.fonte='attesi';
+      if(!r.azienda && nostre.length!==1) r.azienda=a.azienda;
+    }
+    // 2) modello imparato
+    if(!r.numero_ddt && modello){
+      r.numero_ddt=valoreDaAncora(t, modello.ancora_numero, 'numero');
+      r.data_ddt=valoreDaAncora(t, modello.ancora_data, 'data');
+      if(r.numero_ddt) r.fonte='modello';
+    }
+    // 3) regole generiche
+    if(!r.numero_ddt){
+      const g=numeroGenerico(t);
+      if(g){ r.numero_ddt=g.numero; r.data_ddt=r.data_ddt||dataGenerica(t,g.index); r.fonte='generico'; }
+    }
+    if(!r.data_ddt) r.data_ddt=dataGenerica(t,null);
+
+    // azienda
+    if(!r.azienda){
+      if(nostre.length===1) r.azienda=nostre[0];
+      else if(modello?.azienda_predefinita) r.azienda=modello.azienda_predefinita;
+    }
+    if(!r.azienda) r.avvisi.push(nostre.length>1? 'Nel DDT ci sono entrambe le aziende: scegli quella giusta.' : 'Azienda non riconosciuta: sceglila.');
+    if(!r.numero_ddt) r.avvisi.push('Numero DDT non trovato: scrivilo, dalla prossima volta per questo fornitore lo trovo da solo.');
+    else if(r.fonte==='generico') r.avvisi.push('Numero e data trovati con regole generiche: controllali.');
+    return r;
+  }
+
+  // dopo la conferma: impara dove questo fornitore scrive numero e data
+  function imparaModello(testo, d, vecchio){
+    if(!d.fornitore_piva || !testo) return null;
+    const t=String(testo);
+    const an=ancoraPer(t, posNumero(t, d.numero_ddt));
+    let ad=null;
+    if(d.data_ddt){
+      const dd=dateIn(t).find(x=>x.iso===d.data_ddt);
+      if(dd) ad=ancoraPer(t, dd.index);
+    }
+    return {
+      fornitore_piva: String(d.fornitore_piva).replace(/\D/g,'').slice(-11),
+      fornitore_denominazione: d.fornitore_denominazione || vecchio?.fornitore_denominazione || null,
+      ancora_numero: an ? JSON.stringify(an) : (vecchio?.ancora_numero ?? null),
+      ancora_data: ad ? JSON.stringify(ad) : (vecchio?.ancora_data ?? null),
+      azienda_predefinita: d.azienda || vecchio?.azienda_predefinita || null,
+      esempi: (vecchio?.esempi||0)+1,
+      aggiornato_il: new Date().toISOString(),
+    };
+  }
+  // </lettore> =====================================================================
+
+  function caricaScript(src){ return new Promise((ok,ko)=>{ const s=document.createElement('script'); s.src=src; s.onload=ok; s.onerror=()=>ko(new Error('impossibile caricare '+src)); document.head.appendChild(s); }); }
+  async function pdfjs(){
+    if(!window.pdfjsLib){
+      await caricaScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+    return window.pdfjsLib;
+  }
+  let _ocr=null;
+  async function ocr(immagine){
+    if(!window.Tesseract) await caricaScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js');
+    if(!_ocr) _ocr=await window.Tesseract.createWorker('ita');
+    const { data } = await _ocr.recognize(immagine);
+    return data.text||'';
+  }
+  // ricostruisce le righe del PDF dalla posizione delle scritte
+  function righeDaItems(items){
+    const rows=[];
+    for(const it of items){ if(!it.str || !it.str.trim()) continue;
+      const x=it.transform[4], y=it.transform[5];
+      let r=rows.find(r=>Math.abs(r.y-y)<=3); if(!r){ r={y,items:[]}; rows.push(r); } r.items.push({x,str:it.str,w:it.width||0}); }
+    rows.sort((a,b)=>b.y-a.y);
+    return rows.map(r=>{ r.items.sort((a,b)=>a.x-b.x); let out='', fine=null;
+      for(const i of r.items){ if(fine!==null) out += (i.x-fine>12 ? '   ' : ' '); out+=i.str.trim(); fine=i.x+i.w; }
+      return out; }).join('\n');
+  }
+  async function testoDaFile(blob){
+    const buf=new Uint8Array(await blob.arrayBuffer());
+    if(buf[0]===0x25 && buf[1]===0x50 && buf[2]===0x44 && buf[3]===0x46){
+      const lib=await pdfjs(); const pdf=await lib.getDocument({data:buf}).promise;
+      let testo='';
+      for(let p=1;p<=Math.min(pdf.numPages,3);p++){ const pg=await pdf.getPage(p); testo+=righeDaItems((await pg.getTextContent()).items)+'\n'; }
+      if(testo.replace(/\s/g,'').length>=60) return testo;
+      // PDF scansionato: leggo le immagini delle pagine con l'OCR
+      let t='';
+      for(let p=1;p<=Math.min(pdf.numPages,2);p++){
+        const pg=await pdf.getPage(p); const vp=pg.getViewport({scale:2.2});
+        const cv=document.createElement('canvas'); cv.width=vp.width; cv.height=vp.height;
+        await pg.render({canvasContext:cv.getContext('2d'), viewport:vp}).promise;
+        t+=await ocr(cv)+'\n';
+      }
+      return t;
+    }
+    return await ocr(blob);
+  }
+  function modelloLetto(m){ const j=v=>{ try{ return v? JSON.parse(v):null; }catch{ return null; } }; return {...m, ancora_numero:j(m.ancora_numero), ancora_data:j(m.ancora_data)}; }
+  function contesto(){
+    const f=new Map(), add=(piva,nome)=>{ if(!piva && !nome) return; const k=piva? String(piva).replace(/\D/g,'').slice(-11) : nome; if(!f.has(k) || (nome && !f.get(k).nome)) f.set(k,{piva:piva?k:null,nome}); };
+    for(const a of attesi) add(a.fornitore_piva, a.fornitore_denominazione);
+    for(const d of archivio) add(d.fornitore_piva, d.fornitore_denominazione);
+    for(const m of Object.values(modelli)) add(m.fornitore_piva, m.fornitore_denominazione);
+    for(const x of fornitoriFatture) add(x.piva, x.nome);
+    const mod={}; for(const [k,m] of Object.entries(modelli)) mod[k]=modelloLetto(m);
+    return { fornitori:[...f.values()], modelli:mod, attesi:attesi.map(a=>({...a, aperto:!fatto(a)})) };
+  }
+  async function leggiLocale(d, file, rileggi=false){
+    inLettura.add(d.id);
+    try{
+      let testo = (!file && d.testo_letto && !rileggi) ? d.testo_letto : null;
+      if(!testo){
+        let blob=file;
+        if(!blob){ const { data, error } = await supabase.storage.from(BUCKET).download(d.file_path); if(error) throw error; blob=data; }
+        testo=await testoDaFile(blob);
+      }
+      const x=interpretaDdt(testo, contesto());
+      const agg={ stato:'da_confermare', testo_letto:testo.slice(0,30000), avviso_lettura:x.avvisi.join(' ')||null };
+      for(const k of ['azienda','fornitore_piva','fornitore_denominazione','numero_ddt','data_ddt']) if(x[k]) agg[k]=x[k];
+      const { data, error } = await supabase.from('ddt_ricevuti').update(agg).eq('id',d.id).neq('stato','protocollato').select('*').single();
+      if(error) throw error;
+      return { ok:true, ddt:data };
+    }catch(e){
+      const m=e.message||String(e);
+      await supabase.from('ddt_ricevuti').update({ stato:'da_confermare', avviso_lettura:'Lettura non riuscita ('+m+'): compila i dati a mano.' }).eq('id',d.id).eq('stato','in_lettura');
+      return { ok:false, errore:m };
+    }finally{ inLettura.delete(d.id); }
+  }
+  // documenti arrivati via email (o caricamenti interrotti): li leggo uno alla volta
+  let leggendo=false;
+  async function leggiInAttesa(){
+    if(leggendo) return; leggendo=true;
+    try{
+      for(const d of coda.filter(x=>x.stato==='in_lettura' && !inLettura.has(x.id))){
+        const r=await leggiLocale(d); aggiornaUna(r.ddt||null, d.id);
+      }
+    }finally{ leggendo=false; }
+  }
+  async function impara(d){
+    try{
+      if(!d?.testo_letto || !d.fornitore_piva || !d.numero_ddt) return;
+      const piva=String(d.fornitore_piva).replace(/\D/g,'').slice(-11);
+      const m=imparaModello(d.testo_letto, d, modelli[piva]); if(!m) return;
+      const { error } = await supabase.from('ddt_modelli').upsert(m);
+      if(!error) modelli[piva]=m;
+    }catch{ /* imparare e' un di piu': se non riesce il protocollo resta valido */ }
   }
 
   /* ---------------- DDT attesi ---------------- */
@@ -327,30 +614,23 @@
         if(up) throw up;
         const { data:ins, error:ie } = await supabase.from('ddt_ricevuti').insert({ file_path:path, file_nome:f.name, file_tipo:f.type||null, impronta, origine:'caricamento' }).select('id').single();
         if(ie){ await supabase.storage.from(BUCKET).remove([path]); throw ie; }
-        daLeggere.push({id:ins.id, nome:f.name});
+        daLeggere.push({id:ins.id, nome:f.name, file:f});
       }catch(err){ riga(`${f.name}: errore ${err.message||err}`,'danger'); }
       fatti++;
     }
     await carica();
-    // lettura AI, due alla volta
+    // lettura gratuita, uno alla volta (l'OCR delle scansioni impegna il computer)
     let letti=0; const totL=daLeggere.length;
-    const lavora=async()=>{ while(daLeggere.length){ const x=daLeggere.shift();
-      $('prog-text').textContent=`Leggo i DDT con l'AI: ${letti} di ${totL}…`;
-      const r=await leggi(x.id); letti++;
+    for(const x of daLeggere){
+      $('prog-text').textContent=`Leggo i DDT: ${letti+1} di ${totL}… (le scansioni richiedono qualche secondo)`;
+      const d=coda.find(c=>c.id===x.id) || {id:x.id};
+      const r=await leggiLocale(d, x.file); letti++;
       riga(r.ok? `${x.nome}: letto` : `${x.nome}: da completare a mano (${r.errore})`, r.ok?'':'danger');
       $('prog-bar').style.width=Math.round(letti/Math.max(totL,1)*100)+'%';
       aggiornaUna(r.ddt||null, x.id);
-    } };
-    await Promise.all([lavora(),lavora()]);
+    }
     $('prog-text').textContent=`Fatto: ${tot} file, ${totL} nuovi da confermare.`;
     await carica();
-  }
-  async function leggi(id){
-    try{
-      const { data, error } = await supabase.functions.invoke(FUNZIONE,{ body:{ azione:'leggi', id } });
-      if(error){ let m=error.message; try{ m=(await error.context.json()).errore||m; }catch{} return {ok:false, errore:m}; }
-      return { ok:true, ddt:data.ddt };
-    }catch(e){ return {ok:false, errore:e.message}; }
   }
   function aggiornaUna(d,id){ const i=coda.findIndex(x=>x.id===(d?.id||id)); if(d && i>=0){ coda[i]=d; renderCoda(); } }
 
@@ -382,7 +662,7 @@
         <div class="qtop">
           <span class="fname">${esc(d.file_nome||d.file_path)}</span>
           ${d.origine==='email'?`<span class="chip email" title="${esc(d.email_mittente||'')}">via email</span>`:''}
-          ${busy?'<span class="chip">lettura in corso…</span>':''}
+          ${busy?'<span class="chip">da leggere…</span>':''}
           <span class="muted small">${quando(d.creato_il)}</span>
           <span style="flex:1"></span>
           <button class="btn btn-ghost btn-sm a-apri">Apri file</button>
@@ -400,7 +680,7 @@
         <div class="qacts">
           <button class="btn btn-primary btn-sm a-prot" ${busy?'disabled':''}>Protocolla e archivia</button>
           <button class="btn btn-ghost btn-sm a-salva">Salva</button>
-          <button class="btn btn-ghost btn-sm a-rileggi">Rileggi con AI</button>
+          <button class="btn btn-ghost btn-sm a-rileggi">Rileggi</button>
           <span class="sp"></span>
           <button class="btn btn-ghost btn-sm danger a-scarta">Scarta</button>
         </div>
@@ -430,11 +710,11 @@
         btn.disabled=true; const s=await salva(id,card);
         if(!s.azienda){ btn.disabled=false; return toast('Scegli l\'azienda'); }
         if(!s.numero_ddt || !s.fornitore_denominazione){ if(!confirm('Mancano fornitore o numero DDT. Protocollare lo stesso?')){ btn.disabled=false; return; } }
-        const prot=await protocolla(id); toast(`✓ Protocollato ${prot}`); return carica();
+        const prot=await protocolla(id); await impara(s); toast(`✓ Protocollato ${prot}`); return carica();
       }
       if(btn.classList.contains('a-rileggi')){
         btn.disabled=true; btn.textContent='Leggo…';
-        const r=await leggi(id); if(!r.ok) toast('Lettura non riuscita: '+r.errore);
+        const r=await leggiLocale(d, null, true); if(!r.ok) toast('Lettura non riuscita: '+r.errore);
         return carica();
       }
       if(btn.classList.contains('a-scarta')){
@@ -450,7 +730,7 @@
     const b=$('btn-prot-tutti'); b.disabled=true; let ok=0;
     for(const d of pronti){
       const card=document.querySelector(`.qcard[data-id="${d.id}"]`);
-      try{ if(card) await salva(d.id,card); await protocolla(d.id); ok++; }catch(err){ toast(`${d.file_nome}: ${err.message}`); }
+      try{ const s2=card? await salva(d.id,card) : d; await protocolla(d.id); await impara(s2); ok++; }catch(err){ toast(`${d.file_nome}: ${err.message}`); }
     }
     b.disabled=false; toast(`✓ Protocollati ${ok} DDT`); carica();
   });

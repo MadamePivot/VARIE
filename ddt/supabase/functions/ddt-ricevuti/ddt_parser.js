@@ -26,8 +26,8 @@ function pulisciNumero(s){
 }
 
 export function chiaveNumero(numero){
-  // primo gruppo di cifre senza zeri iniziali + eventuali lettere attaccate: "00669"->"669", "BC 113"->"113", "23/C"->"23", "06A"->"6a"
-  const m=(numero||'').toLowerCase().match(/(\d+)([a-z]?)/);
+  // primo gruppo di cifre senza zeri iniziali + eventuali lettere attaccate: "00669"->"669", "BC 113"->"113", "23/C"->"23", "06A"->"6a", "1.331/V"->"1331"
+  const m=(numero||'').toLowerCase().replace(/(\d)\.(?=\d)/g,'$1').match(/(\d+)([a-z]?)/);
   return m ? String(parseInt(m[1],10))+m[2] : (numero||'').toLowerCase().replace(/[^a-z0-9]/g,'');
 }
 
