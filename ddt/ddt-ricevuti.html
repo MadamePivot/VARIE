@@ -186,6 +186,8 @@
   </main>
 </div>
 <div id="toast"></div>
+<datalist id="lista-fornitori"></datalist>
+<datalist id="lista-pive"></datalist>
 
 <script type="module">
   import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -234,6 +236,7 @@
     const [{ data:mod }, { data:forn }] = await Promise.all([ supabase.from('ddt_modelli').select('*'), supabase.rpc('ddt_elenco_fornitori') ]);
     modelli={}; for(const m of mod||[]) modelli[m.fornitore_piva]=m;
     fornitoriFatture=forn||[];
+    riempiListaFornitori();
     await caricaAttesi();
     leggiInAttesa();
   }
@@ -521,6 +524,12 @@
     const mod={}; for(const [k,m] of Object.entries(modelli)) mod[k]=modelloLetto(m);
     return { fornitori:[...f.values()], modelli:mod, attesi:attesi.map(a=>({...a, aperto:!fatto(a)})) };
   }
+  function elencoFornitori(){ return contesto().fornitori.filter(f=>f.nome).sort((a,b)=>a.nome.localeCompare(b.nome,'it')); }
+  function riempiListaFornitori(){
+    const l=elencoFornitori();
+    $('lista-fornitori').innerHTML=l.map(f=>`<option value="${esc(f.nome)}">${esc(f.piva||'')}</option>`).join('');
+    $('lista-pive').innerHTML=l.filter(f=>f.piva).map(f=>`<option value="${esc(f.piva)}">${esc(f.nome)}</option>`).join('');
+  }
   async function leggiLocale(d, file, rileggi=false){
     inLettura.add(d.id);
     try{
@@ -715,7 +724,7 @@
               <option value="">— scegli —</option>
               ${Object.keys(AZ).map(a=>`<option value="${a}" ${d.azienda===a?'selected':''}>${AZ[a]==='MP'?'Madame Pivot':'MP Spazio Lab'}</option>`).join('')}
             </select></div>
-          ${CAMPI.map(([k,l,w,t])=>`<div class="field ${w}"><label>${l}</label><input class="input f ${k==='numero_ddt'?'mono':''}" data-k="${k}" type="${t||'text'}" value="${esc(d[k]||'')}"></div>`).join('')}
+          ${CAMPI.map(([k,l,w,t])=>`<div class="field ${w}"><label>${l}</label><input class="input f ${k==='numero_ddt'||k==='fornitore_piva'?'mono':''}" data-k="${k}" type="${t||'text'}" value="${esc(d[k]||'')}"${k==='fornitore_denominazione'?' list="lista-fornitori" placeholder="Scrivi per cercare…" autocomplete="off"':k==='fornitore_piva'?' list="lista-pive" autocomplete="off"':''}></div>`).join('')}
         </div>
         ${(d.righe||[]).length?`<details class="righe"><summary>${d.righe.length} righe articolo</summary><table>${d.righe.map(r=>`<tr><td class="mono">${esc(r.codice)}</td><td>${esc(r.descrizione)}</td><td style="text-align:right">${esc(r.quantita)} ${esc(r.unita_misura)}</td></tr>`).join('')}</table></details>`:''}
         <div class="qacts">
@@ -813,6 +822,20 @@
   // (solo se non stai modificando una scheda, per non perdere quello che hai scritto)
   let modificato=false;
   $('coda').addEventListener('input',()=>{ modificato=true; });
+  // fornitore scelto dall'elenco: compilo la P.IVA (e viceversa)
+  $('coda').addEventListener('change', e=>{
+    const i=e.target; if(!i.classList.contains('f')) return;
+    const card=i.closest('.qcard'), campo=k=>card.querySelector(`.f[data-k="${k}"]`);
+    if(i.dataset.k==='fornitore_denominazione'){
+      const f=elencoFornitori().find(x=>x.nome && x.nome.toLowerCase()===i.value.trim().toLowerCase());
+      if(f && f.piva) campo('fornitore_piva').value=f.piva;
+    }
+    if(i.dataset.k==='fornitore_piva'){
+      const p=i.value.replace(/\D/g,'').slice(-11);
+      const f=elencoFornitori().find(x=>x.piva===p);
+      if(f){ i.value=p; if(!campo('fornitore_denominazione').value.trim()) campo('fornitore_denominazione').value=f.nome; }
+    }
+  });
   const _render=renderCoda; renderCoda=function(){ modificato=false; _render(); };
   setInterval(()=>{ if($('app-screen').style.display==='block' && !document.hidden && !modificato) carica(); }, 60000);
 </script>
