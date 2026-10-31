@@ -223,7 +223,7 @@
   const BUCKET = 'ddt-ricevuti';
   const FUNZIONE = 'ddt-ricevuti';
   // VERSIONE DEL PROGRAMMA: si vede in alto e resta registrata su ogni DDT letto
-  const VERSIONE = 'v4';
+  const VERSIONE = 'v5';
   const VERSIONE_DATA = '31/10/2026';
   const AZ = { 'MADAME PIVOT SRL':'MP', 'MP SPAZIO LAB SRL':'LAB' };
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -301,9 +301,22 @@
     }
     return out;
   }
+  // cifra di controllo della partita IVA italiana
+  function pivaValida(p){
+    if(!/^\d{11}$/.test(p)) return false;
+    let t=0; for(let i=0;i<10;i++){ let c=+p[i]; if(i%2){ c*=2; if(c>9) c-=9; } t+=c; }
+    return (10 - t%10)%10 === +p[10];
+  }
+  // P.IVA nel testo: valida per cifra di controllo, oppure scritta subito dopo "P.IVA"/"C.F." (l'OCR puo' sbagliare una cifra).
+  // Cosi' file di numeri come le taglie "38 39 40 41 42" non diventano una P.IVA.
   function piveIn(testo){
     const out=[]; const re=/(?<![\d])(?:it\s?)?((?:\d\s?){10}\d)(?![\d])/gi; let m;
-    while((m=re.exec(testo))){ const p=m[1].replace(/\s/g,''); if(p.length===11) out.push({piva:p, index:m.index}); }
+    while((m=re.exec(testo))){
+      const p=m[1].replace(/\s/g,''); if(p.length!==11) continue;
+      const prima=piatto(testo.slice(Math.max(0,m.index-30), m.index));
+      const etichetta=/(iva|p\.?\s?i\.?|c\.?\s?f\.?|fisc\w*|partita)[^a-z0-9]{0,12}(it)?[\s:.]*$/.test(prima);
+      if(pivaValida(p) || etichetta) out.push({piva:p, index:m.index});
+    }
     return out;
   }
   // posizione del numero DDT nel testo, tollerando le piccole differenze dell'OCR
@@ -466,6 +479,22 @@
     if(!forn){
       const unaCifra=(a,b)=>{ let d=0; for(let i=0;i<11;i++) if(a[i]!==b[i] && ++d>1) return false; return d===1; };
       for(const p of altre){ for(const [k,f] of noti){ if(k.length===11 && unaCifra(p.piva,k)){ forn=f; break; } } if(forn) break; }
+    }
+    // sito web o email del fornitore (www.solettificioterry.it, info@tacchificiopienne.it)
+    if(!forn){
+      const domini=[...t.matchAll(/(?:www\s?\.\s?|@\s?)([a-z0-9\-]{4,})\s?\./gi)].map(m=>m[1].toLowerCase().replace(/-/g,''))
+        .filter(d=>!/madamepivot|spaziolab|gmail|libero|hotmail|yahoo|pec|legalmail|outlook|alice|tiscali|virgilio/.test(d));
+      const compatto=n=>soloParole(n).split(' ').filter(w=>w.length>1 && !['srl','spa','sas','snc','srls','sr','di','del','e','c','s','a','l','the'].includes(w)).join('');
+      let best=null;
+      for(const f of ctx.fornitori){
+        if(NOSTRE[String(f.piva||'').replace(/\D/g,'').slice(-11)]) continue;
+        const c=compatto(f.nome); if(c.length<5) continue;
+        for(const d of domini){
+          const ok = d.includes(c) || (c.includes(d) && d.length>=6);
+          if(ok && (!best || c.length>best.c.length)) best={c,f};
+        }
+      }
+      if(best) forn=best.f;
     }
     // firma imparata (per i DDT dove nome e P.IVA del fornitore sono solo nel logo)
     if(!forn && !altre.length){
@@ -637,7 +666,21 @@
       const lib=await pdfjs(); const pdf=await lib.getDocument({data:buf}).promise;
       let testo='';
       for(let p=1;p<=Math.min(pdf.numPages,3);p++){ const pg=await pdf.getPage(p); testo+=righeDaItems((await pg.getTextContent()).items)+'\n'; }
-      if(testo.replace(/\s/g,'').length>=60) return testo;
+      if(testo.replace(/\s/g,'').length>=60){
+        // PDF digitale: se manca la P.IVA del fornitore, spesso nome e P.IVA sono nel logo (immagine).
+        // Leggo con l'OCR la parte alta della prima pagina e la aggiungo in testa.
+        if(!piveIn(testo).some(p=>!NOSTRE[p.piva])){
+          try{
+            const pg=await pdf.getPage(1); const vp=pg.getViewport({scale:3.5});
+            const cv=document.createElement('canvas'); cv.width=vp.width; cv.height=vp.height;
+            await pg.render({canvasContext:cv.getContext('2d'), viewport:vp}).promise;
+            const alto=document.createElement('canvas'); alto.width=cv.width; alto.height=Math.round(cv.height*0.35);
+            alto.getContext('2d').drawImage(cv,0,0);
+            testo=(await ocrSemplice(alto))+'\n'+testo;
+          }catch{ /* se l'OCR non riesce resta il testo del PDF */ }
+        }
+        return testo;
+      }
       // PDF scansionato: leggo le immagini delle pagine con l'OCR
       let t='';
       for(let p=1;p<=Math.min(pdf.numPages,2);p++){
