@@ -46,7 +46,8 @@
   .seg{display:inline-flex;background:var(--soft);border-radius:10px;padding:3px}
   .seg button{border:none;background:transparent;padding:6px 12px;border-radius:8px;font-size:13px;font-weight:600;color:var(--ink-2)}
   .seg button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.06)}
-  main{max-width:1180px;margin:0 auto;padding:22px 20px 80px}
+  main{max-width:1180px;margin:0 auto;padding:4px 20px 80px}
+  .comune{max-width:1180px;margin:0 auto;padding:22px 20px 0}
 
   #drop{border:2px dashed var(--line);border-radius:var(--r);background:var(--card);padding:22px;display:flex;gap:16px;align-items:center;cursor:pointer;transition:border-color .15s, background .15s}
   #drop:hover, body.dragging #drop{border-color:var(--accent);background:var(--accent-bg)}
@@ -157,10 +158,10 @@
     </div>
     <nav class="tabs" id="tabs">
       <button data-t="carica" class="on">Carica e protocolla <span class="n" id="t-coda">0</span></button>
-      <button data-t="attesi">DDT attesi dalle fatture <span class="n" id="t-attesi">0</span></button>
+      <button data-t="archivio">Archivio protocollati <span class="n" id="t-arch">0</span></button>
     </nav>
   </header>
-  <main id="tab-carica">
+  <div class="comune">
     <div id="drop" tabindex="0">
       <div class="ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m6 10 6-6 6 6"/><path d="M4 20h16"/></svg></div>
       <div>
@@ -176,22 +177,17 @@
     </div>
     <div id="progress"><div id="prog-text"></div><div class="bar"><i id="prog-bar"></i></div><ul id="prog-log"></ul></div>
 
+  </div>
+  <main id="tab-carica">
     <div class="section-title">
       <h2>Da confermare</h2><span class="n" id="n-coda">0</span><span class="sp"></span>
       <button class="btn btn-primary btn-sm" id="btn-prot-tutti" style="display:none">Protocolla tutti quelli completi</button>
     </div>
     <div id="coda"></div>
 
-    <div class="section-title">
-      <h2>Archivio protocollati</h2><span class="n" id="n-arch">0</span><span class="sp"></span>
-      <div class="tools"><button class="btn btn-ghost btn-sm" id="arch-azzera">Togli filtri</button><input class="input" id="cerca" type="search" placeholder="Cerca fornitore, numero, protocollo…"></div>
-    </div>
-    <div id="archivio"></div>
-  </main>
 
-  <main id="tab-attesi" style="display:none">
-    <div class="section-title" style="margin-top:6px">
-      <h2>DDT attesi dalle fatture 2026</h2><span class="sp"></span>
+    <div class="section-title">
+      <h2>DDT attesi dalle fatture 2026</h2><span class="n" id="t-attesi">0</span><span class="sp"></span>
       <button class="btn btn-ghost btn-sm" id="btn-aggiorna-attesi">Aggiorna dalle fatture</button>
     </div>
     <p class="muted small" style="margin:-4px 0 12px">Numeri DDT scritti nelle fatture d'acquisto. Si spuntano da soli quando il DDT viene protocollato; puoi spuntarli anche a mano.</p>
@@ -206,6 +202,14 @@
       <label class="lbl"><input type="checkbox" id="mostra-nostri"> mostra anche i nostri DDT (conto lavoro)</label>
     </div>
     <div id="attesi"></div>
+  </main>
+
+  <main id="tab-archivio" style="display:none">
+    <div class="section-title">
+      <h2>Archivio protocollati</h2><span class="n" id="n-arch">0</span><span class="sp"></span>
+      <div class="tools"><button class="btn btn-ghost btn-sm" id="arch-azzera">Togli filtri</button><input class="input" id="cerca" type="search" placeholder="Cerca fornitore, numero, protocollo…"></div>
+    </div>
+    <div id="archivio"></div>
   </main>
 </div>
 <div id="toast"></div>
@@ -223,7 +227,7 @@
   const BUCKET = 'ddt-ricevuti';
   const FUNZIONE = 'ddt-ricevuti';
   // VERSIONE DEL PROGRAMMA: si vede in alto e resta registrata su ogni DDT letto
-  const VERSIONE = 'v5';
+  const VERSIONE = 'v6';
   const VERSIONE_DATA = '31/10/2026';
   const AZ = { 'MADAME PIVOT SRL':'MP', 'MP SPAZIO LAB SRL':'LAB' };
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -259,7 +263,7 @@
   async function carica(){
     const [{data:q,error:e1},{data:a,error:e2}] = await Promise.all([
       supabase.from('ddt_ricevuti').select('*').in('stato',['in_lettura','da_confermare']).order('creato_il'),
-      supabase.from('ddt_ricevuti').select('id,protocollo,azienda,fornitore_denominazione,fornitore_piva,numero_ddt,data_ddt,protocollato_il,origine,file_path,file_nome,righe,causale_trasporto,note,email_mittente').eq('stato','protocollato').order('protocollato_il',{ascending:false}).limit(2000),
+      supabase.from('ddt_ricevuti').select('id,protocollo,protocollo_precedente,azienda,fornitore_denominazione,fornitore_piva,numero_ddt,data_ddt,protocollato_il,origine,file_path,file_nome,righe,causale_trasporto,note,email_mittente').eq('stato','protocollato').order('protocollato_il',{ascending:false}).limit(2000),
     ]);
     if(e1||e2){ $('coda').innerHTML=`<div class="empty danger">Errore: ${esc((e1||e2).message)}</div>`; return; }
     coda=q||[]; archivio=a||[];
@@ -296,8 +300,8 @@
   function dateIn(testo){
     const out=[]; RE_DATA.lastIndex=0; let m;
     while((m=RE_DATA.exec(testo))){
-      let y,mo,d; if(m[1]){y=+m[1];mo=+m[2];d=+m[3];} else {d=+m[4];mo=+m[5];y=+m[6]; if(y<100) y+=2000;}
-      if(mo>=1&&mo<=12&&d>=1&&d<=31&&y>=2015&&y<=2100) out.push({iso:`${y}-${pad2(mo)}-${pad2(d)}`, index:m.index, raw:m[0]});
+      let y,mo,d; if(m[1]){y=+m[1];mo=+m[2];d=+m[3];} else {d=+m[4];mo=+m[5];y=+m[6]; if(y<100) y+= y>=70 ? 1900 : 2000;}  // "14/08/96" (D.P.R. 472/96) e' il 1996, non il 2096
+      if(mo>=1&&mo<=12&&d>=1&&d<=31&&y>=2015&&y<=new Date().getFullYear()+1) out.push({iso:`${y}-${pad2(mo)}-${pad2(d)}`, index:m.index, raw:m[0]});
     }
     return out;
   }
@@ -820,7 +824,7 @@
     const b=e.target.closest('button'); if(!b) return;
     $('tabs').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
     $('tab-carica').style.display = b.dataset.t==='carica' ? '' : 'none';
-    $('tab-attesi').style.display = b.dataset.t==='attesi' ? '' : 'none';
+    $('tab-archivio').style.display = b.dataset.t==='archivio' ? '' : 'none';
   });
 
   /* ---------------- caricamento file ---------------- */
@@ -1013,7 +1017,7 @@
   let inModifica=null;
   // filtri per colonna e ordinamento dell'archivio
   const fa={ prot:'', az:'', forn:'', num:'', anno:'', mese:'' };
-  let ordine={ col:'protocollato_il', dir:-1 };
+  let ordine={ col:'data_ddt', dir:-1 };
   const MESI=['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
   const COLONNE=[
     {k:'protocollo', t:'Protocollo', v:d=>d.protocollo||''},
@@ -1051,8 +1055,8 @@
     const q=$('cerca').value.trim().toLowerCase();
     const contiene=(x,y)=>(x||'').toLowerCase().includes(y.toLowerCase());
     let lista=archivio.filter(d=>(!filtroAz||d.azienda===filtroAz)
-      && (!q || [d.protocollo,d.fornitore_denominazione,d.numero_ddt,d.fornitore_piva,d.file_nome].some(x=>contiene(x,q)))
-      && (!fa.prot || contiene(d.protocollo,fa.prot))
+      && (!q || [d.protocollo,d.protocollo_precedente,d.fornitore_denominazione,d.numero_ddt,d.fornitore_piva,d.file_nome].some(x=>contiene(x,q)))
+      && (!fa.prot || contiene(d.protocollo,fa.prot) || contiene(d.protocollo_precedente,fa.prot))
       && (!fa.az || d.azienda===fa.az)
       && (!fa.forn || d.fornitore_denominazione===fa.forn)
       && (!fa.num || contiene(d.numero_ddt,fa.num) || (chiave(fa.num) && chiave(d.numero_ddt)===chiave(fa.num)))
@@ -1064,10 +1068,11 @@
     const filtrato = !!q || Object.values(fa).some(Boolean);
     $('arch-azzera').style.display = filtrato ? 'inline-block' : 'none';
     $('n-arch').textContent = filtrato ? `${lista.length} di ${archivio.length}` : archivio.length;
+    $('t-arch').textContent = archivio.length;
     $('arch-vuoto').style.display = lista.length ? 'none' : '';
     $('arch-vuoto').textContent = archivio.length ? 'Nessun DDT con questi filtri.' : 'Nessun DDT protocollato.';
     $('arch-corpo').innerHTML=lista.map(d=>`<tr data-id="${d.id}">
-      <td class="mono">${esc(d.protocollo)}</td>
+      <td class="mono">${esc(d.protocollo)}${d.protocollo_precedente && d.protocollo_precedente!==d.protocollo ? `<div class="muted small" title="Numero assegnato prima della rinumerazione">prima ${esc(d.protocollo_precedente)}</div>` : ''}</td>
       <td>${chipAz(d.azienda)}</td>
       <td>${esc(d.fornitore_denominazione||'')}${d.fornitore_piva?`<div class="muted small mono">${esc(d.fornitore_piva)}</div>`:''}</td>
       <td class="mono">${d.numero_ddt?esc(d.numero_ddt):'<span class="danger small">manca</span>'}</td>
