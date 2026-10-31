@@ -1,0 +1,1098 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DDT ricevuti · Madame Pivot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F6F3EE; --card:#FFFFFF; --soft:#F1ECE4; --line:#E6E0D5;
+    --ink:#1F2421; --ink-2:#646B66; --ink-3:#9AA09B;
+    --accent:#2F6F5E; --accent-2:#245446; --accent-bg:#E4EFEA;
+    --mp:#8A3B5C; --mp-bg:#F5E6EC; --lab:#2E5E8C; --lab-bg:#E3ECF5;
+    --warn:#9A6A12; --warn-bg:#FBF1DC; --danger:#A8453A; --danger-bg:#F8E5E2;
+    --shadow:0 1px 2px rgba(31,36,33,.04), 0 4px 16px rgba(31,36,33,.05);
+    --r:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:'Inter',system-ui,sans-serif;font-size:14px;line-height:1.45;min-height:100vh;-webkit-font-smoothing:antialiased}
+  .mono{font-family:'IBM Plex Mono',monospace}
+  button{font-family:inherit;cursor:pointer}
+  input,select,textarea{font-family:inherit;font-size:14px;color:var(--ink)}
+  .eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:600}
+  .input{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:#FCFBF9}
+  .input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-bg)}
+  .btn{border:none;border-radius:10px;padding:9px 16px;font-weight:600;font-size:14px}
+  .btn-primary{background:var(--accent);color:#fff} .btn-primary:hover{background:var(--accent-2)}
+  .btn-primary:disabled{opacity:.5;cursor:not-allowed}
+  .btn-ghost{background:transparent;border:1px solid var(--line);color:var(--ink-2)} .btn-ghost:hover{border-color:var(--ink-3);color:var(--ink)}
+  .btn-sm{padding:6px 11px;font-size:13px;border-radius:8px}
+  .danger{color:var(--danger)}
+
+  #login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+  .login-card{background:var(--card);border-radius:20px;padding:40px 34px;width:100%;max-width:390px;box-shadow:var(--shadow)}
+  .login-card h1{font-family:'Fraunces',serif;font-weight:600;font-size:28px;margin:6px 0 24px}
+  .field{margin-bottom:12px} .field label{display:block;font-size:12px;font-weight:600;color:var(--ink-2);margin-bottom:5px}
+  #login-error{color:var(--danger);font-size:13px;margin:-2px 0 12px;display:none}
+
+  #app-screen{display:none}
+  header{position:sticky;top:0;z-index:20;background:rgba(246,243,238,.9);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .head-in{max-width:1180px;margin:0 auto;padding:14px 20px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  .brand h1{font-family:'Fraunces',serif;font-weight:600;font-size:22px;margin:0}
+  .head-in .grow{flex:1}
+  .seg{display:inline-flex;background:var(--soft);border-radius:10px;padding:3px}
+  .seg button{border:none;background:transparent;padding:6px 12px;border-radius:8px;font-size:13px;font-weight:600;color:var(--ink-2)}
+  .seg button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+  main{max-width:1180px;margin:0 auto;padding:22px 20px 80px}
+
+  #drop{border:2px dashed var(--line);border-radius:var(--r);background:var(--card);padding:22px;display:flex;gap:16px;align-items:center;cursor:pointer;transition:border-color .15s, background .15s}
+  #drop:hover, body.dragging #drop{border-color:var(--accent);background:var(--accent-bg)}
+  #drop .ico{width:46px;height:46px;border-radius:12px;background:var(--accent-bg);color:var(--accent);display:flex;align-items:center;justify-content:center;flex:none}
+  #drop strong{display:block;font-size:15px} #drop span{color:var(--ink-2);font-size:13px}
+  #drop .acts{margin-left:auto;display:flex;gap:8px}
+  #progress{margin-top:10px;display:none;background:var(--card);border-radius:12px;padding:12px 16px;box-shadow:var(--shadow);font-size:13px}
+  #progress .bar{height:6px;background:var(--soft);border-radius:4px;margin-top:8px;overflow:hidden}
+  #progress .bar i{display:block;height:100%;background:var(--accent);width:0;transition:width .3s}
+  #progress ul{margin:8px 0 0;padding-left:18px;color:var(--ink-2);max-height:120px;overflow:auto}
+
+  .section-title{display:flex;align-items:baseline;gap:10px;margin:30px 0 12px;flex-wrap:wrap}
+  .section-title h2{font-family:'Fraunces',serif;font-weight:600;font-size:20px;margin:0}
+  .section-title .n{background:var(--soft);color:var(--ink-2);border-radius:20px;padding:1px 9px;font-size:12px;font-weight:600}
+  .section-title .sp{flex:1}
+
+  .qcard{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);padding:16px 18px;margin-bottom:12px;border-left:4px solid var(--line)}
+  .qcard.ok{border-left-color:var(--accent)} .qcard.warn{border-left-color:#D9A43A} .qcard.busy{opacity:.7}
+  .qtop{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  .qtop .fname{font-weight:600;word-break:break-all}
+  .chip{display:inline-block;font-size:11px;font-weight:600;border-radius:6px;padding:2px 7px;background:var(--soft);color:var(--ink-2)}
+  .chip.MP{background:var(--mp-bg);color:var(--mp)} .chip.LAB{background:var(--lab-bg);color:var(--lab)}
+  .chip.email{background:#EEE8F7;color:#5B3F8C}
+  .avviso{background:var(--warn-bg);color:var(--warn);border-radius:9px;padding:8px 11px;font-size:13px;margin-bottom:12px}
+  .qgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px 12px}
+  .qgrid .field{margin:0} .qgrid .w2{grid-column:span 2} .qgrid .w4{grid-column:1/-1}
+  .righe{font-size:12.5px;color:var(--ink-2);margin-top:10px}
+  .righe summary{cursor:pointer;font-weight:600}
+  .righe table{border-collapse:collapse;width:100%;margin-top:6px}
+  .righe td{padding:3px 6px;border-bottom:1px solid var(--soft)}
+  .qacts{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;align-items:center}
+  .qacts .sp{flex:1}
+
+  .tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .tools .input{width:240px}
+  table.arch{width:100%;border-collapse:collapse;background:var(--card);border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow)}
+  table.arch th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);font-weight:600;padding:10px 12px;border-bottom:1px solid var(--line);background:#FCFBF9}
+  table.arch td{padding:9px 12px;border-bottom:1px solid var(--soft);vertical-align:top}
+  table.arch tr:hover td{background:#FBFAF7}
+  .muted{color:var(--ink-3)} .small{font-size:12px}
+  .empty{padding:24px;color:var(--ink-2);background:var(--card);border-radius:var(--r);box-shadow:var(--shadow)}
+  .tabs{max-width:1180px;margin:0 auto;padding:0 20px;display:flex;gap:4px}
+  .tabs button{border:none;background:transparent;padding:10px 14px;font-weight:600;color:var(--ink-2);border-bottom:2px solid transparent;font-size:14px}
+  .tabs button.on{color:var(--ink);border-bottom-color:var(--accent)}
+  .tabs .n{background:var(--soft);border-radius:20px;padding:0 7px;font-size:11px;margin-left:4px}
+  .riepilogo{display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 14px}
+  .riepilogo .box{background:var(--card);border-radius:12px;box-shadow:var(--shadow);padding:10px 16px;min-width:130px}
+  .riepilogo .box b{display:block;font-size:22px;font-family:'Fraunces',serif}
+  .riepilogo .box span{font-size:12px;color:var(--ink-2)}
+  table.arch tr.fatto td{color:var(--ink-3)}
+  table.arch tr.fatto td.forn{text-decoration:line-through}
+  .spunta{width:18px;height:18px;accent-color:var(--accent);cursor:pointer}
+  .stato-ok{color:var(--accent);font-weight:600}
+  .lbl{display:inline-flex;gap:6px;align-items:center;font-size:13px;color:var(--ink-2)}
+  .abbinato{border-radius:9px;padding:8px 11px;font-size:13px;margin-bottom:12px;background:var(--accent-bg);color:var(--accent-2)}
+  .abbinato.no{background:var(--soft);color:var(--ink-2)}
+  #viewer{position:fixed;inset:0;background:rgba(20,24,22,.55);z-index:60;display:none;align-items:center;justify-content:center;padding:18px}
+  #viewer.on{display:flex}
+  #viewer .box{background:var(--card);border-radius:14px;width:min(1000px,100%);height:min(92vh,1200px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+  #viewer .head{display:flex;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line)}
+  #viewer .head .t{flex:1;font-weight:600;word-break:break-all}
+  #viewer iframe, #viewer img{flex:1;width:100%;border:0;background:#525659;object-fit:contain}
+  tr.modifica td{background:#FBFAF7}
+  table.arch th.ord{cursor:pointer;user-select:none;white-space:nowrap}
+  table.arch th.ord:hover{color:var(--ink)}
+  table.arch th.ord .fr{opacity:.35;margin-left:3px}
+  table.arch th.ord.on{color:var(--accent)} table.arch th.ord.on .fr{opacity:1}
+  table.arch tr.filtri th{padding:6px 8px;background:#FCFBF9}
+  table.arch tr.filtri .input{padding:6px 8px;font-size:13px;border-radius:7px;text-transform:none;letter-spacing:0;font-weight:400}
+  .anno-mese{display:flex;gap:4px;min-width:170px}
+  .anno-mese select{flex:1;min-width:80px;padding-right:4px}
+  #arch-azzera{display:none}
+  .mod-grid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px 10px;align-items:end}
+  .mod-grid .field{margin:0}
+  @media (max-width:760px){ .mod-grid{grid-template-columns:1fr 1fr} }
+  .versione{font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:500;color:var(--accent);background:var(--accent-bg);border-radius:6px;padding:2px 7px;vertical-align:middle;margin-left:6px}
+  #toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;opacity:0;pointer-events:none;transition:all .25s;z-index:50}
+  #toast.show{opacity:1;transform:translateX(-50%)}
+  @media (max-width:760px){ .qgrid{grid-template-columns:1fr 1fr} #drop{flex-wrap:wrap} #drop .acts{margin-left:0} table.arch .hide-s{display:none} }
+</style>
+</head>
+<body>
+<div id="login-screen">
+  <div class="login-card">
+    <div class="eyebrow">Madame Pivot · MP Spazio Lab</div>
+    <h1>DDT ricevuti</h1>
+    <p class="muted small" id="versione-login" style="margin:-18px 0 18px"></p>
+    <form id="login-form">
+      <div class="field"><label for="email">Email</label><input class="input" type="email" id="email" required autocomplete="username"></div>
+      <div class="field"><label for="password">Password</label><input class="input" type="password" id="password" required autocomplete="current-password"></div>
+      <div id="login-error"></div>
+      <button type="submit" class="btn btn-primary" style="width:100%" id="login-btn">Accedi</button>
+    </form>
+  </div>
+</div>
+
+<div id="app-screen">
+  <header>
+    <div class="head-in">
+      <div class="brand"><span class="eyebrow">Madame Pivot · MP Spazio Lab</span><h1>DDT ricevuti <span class="versione" id="versione"></span></h1></div>
+      <div class="grow"></div>
+      <div class="seg" id="filtro-az">
+        <button data-f="" class="on">Tutte</button>
+        <button data-f="MADAME PIVOT SRL">Madame Pivot</button>
+        <button data-f="MP SPAZIO LAB SRL">MP Spazio Lab</button>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="logout-btn">Esci</button>
+    </div>
+    <nav class="tabs" id="tabs">
+      <button data-t="carica" class="on">Carica e protocolla <span class="n" id="t-coda">0</span></button>
+      <button data-t="attesi">DDT attesi dalle fatture <span class="n" id="t-attesi">0</span></button>
+    </nav>
+  </header>
+  <main id="tab-carica">
+    <div id="drop" tabindex="0">
+      <div class="ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m6 10 6-6 6 6"/><path d="M4 20h16"/></svg></div>
+      <div>
+        <strong>Trascina qui i DDT (anche tanti insieme)</strong>
+        <span>PDF, scansioni o foto JPG/PNG · li leggo io (gratis) e ti propongo i dati da confermare</span>
+      </div>
+      <div class="acts">
+        <button class="btn btn-ghost btn-sm" id="btn-file" type="button">Scegli file</button>
+        <button class="btn btn-ghost btn-sm" id="btn-cartella" type="button">Scegli cartella</button>
+      </div>
+      <input type="file" id="in-file" accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/*" multiple hidden>
+      <input type="file" id="in-cartella" webkitdirectory multiple hidden>
+    </div>
+    <div id="progress"><div id="prog-text"></div><div class="bar"><i id="prog-bar"></i></div><ul id="prog-log"></ul></div>
+
+    <div class="section-title">
+      <h2>Da confermare</h2><span class="n" id="n-coda">0</span><span class="sp"></span>
+      <button class="btn btn-primary btn-sm" id="btn-prot-tutti" style="display:none">Protocolla tutti quelli completi</button>
+    </div>
+    <div id="coda"></div>
+
+    <div class="section-title">
+      <h2>Archivio protocollati</h2><span class="n" id="n-arch">0</span><span class="sp"></span>
+      <div class="tools"><button class="btn btn-ghost btn-sm" id="arch-azzera">Togli filtri</button><input class="input" id="cerca" type="search" placeholder="Cerca fornitore, numero, protocollo…"></div>
+    </div>
+    <div id="archivio"></div>
+  </main>
+
+  <main id="tab-attesi" style="display:none">
+    <div class="section-title" style="margin-top:6px">
+      <h2>DDT attesi dalle fatture 2026</h2><span class="sp"></span>
+      <button class="btn btn-ghost btn-sm" id="btn-aggiorna-attesi">Aggiorna dalle fatture</button>
+    </div>
+    <p class="muted small" style="margin:-4px 0 12px">Numeri DDT scritti nelle fatture d'acquisto. Si spuntano da soli quando il DDT viene protocollato; puoi spuntarli anche a mano.</p>
+    <div class="riepilogo" id="riepilogo"></div>
+    <div class="tools" style="margin-bottom:12px">
+      <div class="seg" id="filtro-stato">
+        <button data-s="aperti" class="on">Da ricevere</button>
+        <button data-s="fatti">Spuntati</button>
+        <button data-s="tutti">Tutti</button>
+      </div>
+      <input class="input" id="cerca-attesi" type="search" placeholder="Cerca fornitore, numero DDT o fattura…">
+      <label class="lbl"><input type="checkbox" id="mostra-nostri"> mostra anche i nostri DDT (conto lavoro)</label>
+    </div>
+    <div id="attesi"></div>
+  </main>
+</div>
+<div id="toast"></div>
+<div id="viewer"><div class="box">
+  <div class="head"><span class="t" id="v-titolo"></span><a class="btn btn-ghost btn-sm" id="v-scarica" download>Scarica</a><button class="btn btn-primary btn-sm" id="v-chiudi">Chiudi</button></div>
+  <div id="v-corpo" style="flex:1;display:flex"></div>
+</div></div>
+<datalist id="lista-fornitori"></datalist>
+<datalist id="lista-pive"></datalist>
+
+<script type="module">
+  import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+  const SUPABASE_URL = 'https://qwexiqicubanmodaebua.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF3ZXhpcWljdWJhbm1vZGFlYnVhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NTk4MjUsImV4cCI6MjA5OTUzNTgyNX0.Z24OBYkn5SDO41IbfJYljO7yua6d_FNB4_rj5agnDPs';
+  const BUCKET = 'ddt-ricevuti';
+  const FUNZIONE = 'ddt-ricevuti';
+  // VERSIONE DEL PROGRAMMA: si vede in alto e resta registrata su ogni DDT letto
+  const VERSIONE = 'v2';
+  const VERSIONE_DATA = '31/10/2026';
+  const AZ = { 'MADAME PIVOT SRL':'MP', 'MP SPAZIO LAB SRL':'LAB' };
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const $ = id => document.getElementById(id);
+
+  let coda = [], archivio = [], attesi = [], modelli = {}, fornitoriFatture = [], inLettura = new Set(), inCaricamento = new Set(), filtroAz = '', filtroStato = 'aperti', primoAggiornamento = false;
+
+  /* ---------------- utilità ---------------- */
+  function esc(s){ const d=document.createElement('div'); d.textContent=s??''; return d.innerHTML; }
+  function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2800); }
+  function dataIt(iso){ if(!iso) return ''; const [y,m,d]=String(iso).slice(0,10).split('-'); return `${d}/${m}/${y}`; }
+  function quando(iso){ return iso? new Date(iso).toLocaleString('it-IT',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : ''; }
+  function chipAz(az){ return az? `<span class="chip ${AZ[az]}">${AZ[az]==='MP'?'Madame Pivot':'MP Spazio Lab'}</span>` : '<span class="chip">azienda?</span>'; }
+  async function sha256(file){ const b=await crypto.subtle.digest('SHA-256', await file.arrayBuffer()); return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join(''); }
+  function completo(d){ return d.azienda && d.fornitore_denominazione && d.numero_ddt && d.data_ddt; }
+
+  /* ---------------- login ---------------- */
+  function showApp(){ $('login-screen').style.display='none'; $('app-screen').style.display='block'; carica(); }
+  function showLogin(){ $('login-screen').style.display='flex'; $('app-screen').style.display='none'; }
+  document.title = `DDT ricevuti ${VERSIONE}`;
+  $('versione').textContent = VERSIONE; $('versione-login').textContent = `Versione ${VERSIONE} · ${VERSIONE_DATA}`; $('versione').title = `Versione ${VERSIONE} del ${VERSIONE_DATA}`;
+  supabase.auth.getSession().then(({data})=> data.session ? showApp() : showLogin());
+  supabase.auth.onAuthStateChange((e,s)=>{ if(e==='SIGNED_OUT') showLogin(); else if(e==='SIGNED_IN' && $('app-screen').style.display!=='block') showApp(); });
+  $('login-form').addEventListener('submit', async e=>{
+    e.preventDefault(); const b=$('login-btn'); b.disabled=true;
+    const { error } = await supabase.auth.signInWithPassword({ email:$('email').value, password:$('password').value });
+    b.disabled=false;
+    if(error){ $('login-error').textContent='Email o password non corrette.'; $('login-error').style.display='block'; }
+  });
+  $('logout-btn').addEventListener('click', ()=>supabase.auth.signOut());
+
+  /* ---------------- dati ---------------- */
+  async function carica(){
+    const [{data:q,error:e1},{data:a,error:e2}] = await Promise.all([
+      supabase.from('ddt_ricevuti').select('*').in('stato',['in_lettura','da_confermare']).order('creato_il'),
+      supabase.from('ddt_ricevuti').select('id,protocollo,azienda,fornitore_denominazione,fornitore_piva,numero_ddt,data_ddt,protocollato_il,origine,file_path,file_nome,righe,causale_trasporto,note,email_mittente').eq('stato','protocollato').order('protocollato_il',{ascending:false}).limit(2000),
+    ]);
+    if(e1||e2){ $('coda').innerHTML=`<div class="empty danger">Errore: ${esc((e1||e2).message)}</div>`; return; }
+    coda=q||[]; archivio=a||[];
+    renderCoda(); renderArchivio();
+    $('t-coda').textContent=coda.length;
+    const [{ data:mod }, { data:forn }] = await Promise.all([ supabase.from('ddt_modelli').select('*'), supabase.rpc('ddt_elenco_fornitori') ]);
+    modelli={}; for(const m of mod||[]) modelli[m.fornitore_piva]=m;
+    fornitoriFatture=forn||[];
+    riempiListaFornitori();
+    await caricaAttesi();
+    leggiInAttesa();
+  }
+
+  /* ---------------- lettura gratuita (testo del PDF o OCR) ---------------- */
+  // <lettore> ======================================================================
+  // Lettura gratuita dei DDT: dal testo del documento ricava azienda, fornitore, numero e data.
+  // 1) DDT attesi dalle fatture: se nel testo c'e' il numero (e la data) di un DDT atteso di quel fornitore, e' lui.
+  // 2) Modello imparato per il fornitore: le parole che precedono numero e data (o l'intestazione della colonna).
+  // 3) Regole generiche ("DDT n. 123 del 12/10/2026", "Numero documento", "Data").
+  const NOSTRE = { '07096860486':'MADAME PIVOT SRL', '07376920489':'MP SPAZIO LAB SRL' };
+  const RE_DATA = /(?<![\d\/.\-])(?:(\d{4})-(\d{1,2})-(\d{1,2})|(\d{1,2})\s?[\/.\-]\s?(\d{1,2})\s?[\/.\-]\s?(\d{4}|\d{2}))(?![\d\/])/g;
+  const pad2 = n => String(n).padStart(2,'0');
+  const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  const piatto = s => String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+  const soloParole = s => piatto(s).replace(/[^a-z°º]+/g,' ').trim();
+
+  function dateIn(testo){
+    const out=[]; RE_DATA.lastIndex=0; let m;
+    while((m=RE_DATA.exec(testo))){
+      let y,mo,d; if(m[1]){y=+m[1];mo=+m[2];d=+m[3];} else {d=+m[4];mo=+m[5];y=+m[6]; if(y<100) y+=2000;}
+      if(mo>=1&&mo<=12&&d>=1&&d<=31&&y>=2015&&y<=2100) out.push({iso:`${y}-${pad2(mo)}-${pad2(d)}`, index:m.index, raw:m[0]});
+    }
+    return out;
+  }
+  function piveIn(testo){
+    const out=[]; const re=/(?<![\d])(?:it\s?)?((?:\d\s?){10}\d)(?![\d])/gi; let m;
+    while((m=re.exec(testo))){ const p=m[1].replace(/\s/g,''); if(p.length===11) out.push({piva:p, index:m.index}); }
+    return out;
+  }
+  // posizione del numero DDT nel testo, tollerando le piccole differenze dell'OCR
+  // ("1.331/V" trovato anche come "1.331V" o "1331/V"; "00669" anche come "669")
+  function posNumero(testo, numero, largo=false){
+    const c=String(numero||'').replace(/[^A-Za-z0-9]/g,'').replace(/^0+(?=\d)/,'');
+    if(!c) return -1;
+    const re=new RegExp('(?<![A-Za-z0-9])0*'+[...c].map(reEsc).join('[\\s.\\/\\-]?')+(largo?'':'(?![A-Za-z0-9])'),'i');
+    const m=re.exec(testo); return m? m.index : -1;
+  }
+  const chiave = n => { const m=String(n||'').toLowerCase().replace(/(\d)\.(?=\d)/g,'$1').match(/(\d+)([a-z]?)/); return m? String(parseInt(m[1],10))+m[2] : ''; };
+
+  // ---- ancore imparate
+  // {t:'riga', parole:'n doc'}               valore sulla stessa riga, dopo queste parole
+  // {t:'sotto', etichetta:'numero data pag', col:0}  valore nella riga sotto l'intestazione, colonna col
+  function ancoraPer(testo, pos){
+    if(pos<0) return null;
+    const inizioRiga=testo.lastIndexOf('\n',pos-1)+1;
+    // parole dopo l'ultimo valore numerico che precede (es. "DDT n. 455/A del " -> "del")
+    const tok=testo.slice(inizioRiga,pos).trim().split(/\s+/).filter(Boolean);
+    let k=tok.length; while(k>0 && !/\d/.test(tok[k-1])) k--;
+    const prima=soloParole(tok.slice(k).join(' ')).split(' ').filter(Boolean);
+    if(prima.length) return { t:'riga', parole:prima.slice(-3).join(' ') };
+    // valore a inizio riga: cerco l'intestazione nella riga sopra
+    const fineSopra=inizioRiga-1; if(fineSopra<=0) return null;
+    const sopra=testo.slice(testo.lastIndexOf('\n',fineSopra-1)+1, fineSopra);
+    const et=soloParole(sopra); if(!et) return null;
+    const rigaVal=testo.slice(inizioRiga, (testo.indexOf('\n',pos)+1||testo.length+1)-1);
+    const col=pezzi(rigaVal.slice(0,pos-inizioRiga)).length;
+    // posizione rispetto alla data della stessa riga: resta giusta anche se cambiano gli altri campi
+    const di=pezzi(rigaVal).findIndex(x=>dateIn(x).length);
+    return { t:'sotto', etichetta:et.slice(0,60), col, rel: di>=0 && di!==col ? col-di : null };
+  }
+  const pezzi = r => String(r).split(/[\s|\[\]]+/).filter(Boolean);
+  function valoreDaAncora(testo, a, tipo){
+    if(!a) return null;
+    if(a.t==='riga'){
+      const re=new RegExp(a.parole.split(' ').map(reEsc).join('[^a-z0-9°º\\n]*')+'[^a-z0-9\\n]{0,12}','gi');
+      const tp=piatto(testo); let m;
+      while((m=re.exec(tp))){
+        const dopo=testo.slice(m.index+m[0].length, m.index+m[0].length+40);
+        const v=tipo==='data'? (dateIn(dopo)[0]||{}).iso : (dopo.match(/^\s*([A-Za-z]{0,4}[\s\/\-]?\d[\w\/\-.]{0,18})/)||[])[1];
+        if(v) return tipo==='data'? v : v.replace(/[.\-\/]+$/,'').trim();
+      }
+      return null;
+    }
+    if(a.t==='sotto'){
+      const righe=testo.split('\n');
+      for(let i=0;i<righe.length-1;i++){
+        if(!soloParole(righe[i]).includes(a.etichetta.slice(0,20))) continue;
+        const tok=pezzi(righe[i+1]);
+        const di=tok.findIndex(x=>dateIn(x).length);
+        if(tipo==='data'){ const d=dateIn(tok.slice(a.col).join(' '))[0] || dateIn(righe[i+1])[0]; if(d) return d.iso; }
+        else {
+          const v = (a.rel!=null && di>=0) ? tok[di+a.rel] : tok[a.col];
+          if(v && /\d/.test(v)) return v.replace(/[.\-\/]+$/,'');
+        }
+      }
+    }
+    return null;
+  }
+
+  // ---- quanto e' "leggibile" un testo OCR: serve a capire se la pagina era capovolta o girata
+  const PAROLE_DDT=['documento','trasporto','data','partita','iva','descrizione','quantita','destinatario','destinazione','vettore','causale','colli','pagina','spett','via','codice','cliente','fornitore','merce','firma','porto','articolo','ordine','totale','peso','aspetto','beni','consegna','pagamento','fiscale'];
+  function qualitaTesto(t){
+    const tp=' '+soloParole(t)+' ';
+    let n=0; for(const w of PAROLE_DDT) if(tp.includes(' '+w)) n++;
+    return n + 2*Math.min(dateIn(t).length,3) + (piveIn(t).length?2:0);
+  }
+
+  // ---- tabella di intestazione: riga con le etichette ("N. documento  Data documento"), sotto i valori.
+  // Il numero e' il valore accanto alla data: prima o dopo, secondo l'ordine delle etichette.
+  function numeroDaTabella(testo){
+    const righe=testo.split('\n');
+    for(let i=1;i<righe.length;i++){
+      const sopra=piatto(righe[i-1]).replace(/\bn(?:r|um)?\.?\s*pag\w*|pagina|pag\./g,' ');
+      if(!/numero|umero|\bnr\b|\bn\b|n°|ocumento/.test(sopra) || !/\bdata\b|ata\s+doc/.test(sopra)) continue;
+      // i valori possono stare una o due righe sotto (es. una riga "Pag." in mezzo)
+      let d=null;
+      for(let k=0;k<3 && i+k<righe.length;k++){ d=dateIn(righe[i+k])[0]; if(d){ i+=k; break; } }
+      if(!d) continue;
+      const prima=righe[i].slice(0,d.index).split(/[\s|\[\]]+/).filter(Boolean);
+      const dopo=righe[i].slice(d.index+d.raw.length).split(/[\s|\[\]]+/).filter(Boolean);
+      const ok=x=>x && /\d/.test(x) && x.replace(/\D/g,'').length<=9 && !/^\d{1,2}[\/.:]\d{1,2}$/.test(x);
+      const iN=sopra.search(/numero|umero|\bnr\b|\bn\b|n°/), iD=sopra.search(/\bdata\b|ata\s+doc/);
+      const tb=prima[prima.length-1], ta=dopo[0];
+      const v=((iN>=0 && iN>iD) ? [ta,tb] : [tb,ta]).find(ok);
+      if(v) return { numero:v.replace(/[.\-\/]+$/,''), data:d.iso };
+    }
+    return null;
+  }
+
+  // ---- "firma" del modulo di un fornitore: parole tipiche che non cambiano da un DDT all'altro
+  const COMUNI=new Set(('trasporto documento documenti destinatario destinazione diverso madame pivot spazio crocifisso ripoli bellini '+
+    'pontassieve sieci bagno vendita visibile colli conducente vettore vettori ritiro annotazioni pagamento banca appoggio lucca tirreno '+
+    'ordine riferimento articolo descrizione colore taglie prezzo porto lordo netto inizio firma causale aspetto esteriore agente codice '+
+    'fiscale partita anagrafico italia totale quantita spett cliente fornitore merce data pagina numero luogo mezzo cessionario cedente '+
+    'mittente scatole cartoni vista assegnato franco consegna ritiri sconti sconto importo valuta magazzino principale unita misura').split(' '));
+  function paroleFirma(testo){
+    const w=soloParole(testo).split(' ').filter(x=>x.length>=5 && !COMUNI.has(x));
+    return [...new Set(w)];
+  }
+  function firmaCorrisponde(testo, firma){
+    if(!Array.isArray(firma) || firma.length<3) return 0;
+    const presenti=new Set(paroleFirma(testo));
+    const n=firma.filter(x=>presenti.has(x)).length;
+    return (n>=3 && n/firma.length>=0.4) ? n/firma.length : 0;
+  }
+
+  // ---- regole generiche
+  function numeroGenerico(testo){
+    const re=/(?:d\.?\s?d\.?\s?t\.?|documento\s+di\s+trasporto|doc\.?\s*di\s*trasp\w*|bolla(?:\s+di\s+consegna)?|n(?:umero|r)?\.?\s*doc(?:umento)?\.?)[\s|:.'‘’"]*(?:n(?:r|um(?:ero)?)?\.?\s*|n[°º]\s*)?[\s|:.'‘’"]*([A-Z]{0,4}[\s\/\-]?\d[\w\/\-]{0,15})/i;
+    const m=re.exec(testo); if(!m) return null;
+    return { numero:m[1].replace(/[.\-\/]+$/,'').trim(), index:m.index+m[0].length };
+  }
+  function dataGenerica(testo, vicinoA){
+    const tutte=dateIn(testo); if(!tutte.length) return null;
+    if(vicinoA!=null){ const v=tutte.find(d=>d.index>=vicinoA-5 && d.index-vicinoA<80); if(v) return v.iso; }
+    const re=/\bdata\b[^\n\d]{0,25}/gi; let m;
+    while((m=re.exec(testo))){ const d=tutte.find(x=>x.index>=m.index && x.index-m.index<45); if(d) return d.iso; }
+    return tutte[0].iso;
+  }
+
+  /**
+   * ctx = { fornitori:[{piva,nome}], modelli:{piva:modello}, attesi:[{fornitore_piva,fornitore_denominazione,numero_ddt,data_ddt,azienda,aperto}] }
+   */
+  // numero DDT scritto nel nome del file ("Cisapelli 230.pdf", "due A 8527-1.pdf"); non per i nomi automatici degli scanner
+  function numeroDaNomeFile(nome){
+    const base=String(nome||'').replace(/\.[a-z0-9]{2,4}$/i,'');
+    if(!base || /^(scan|img|image|doc|foto|photo|whatsapp|pxl|cam|dsc|scansione|documento)[\s_\-]?\d/i.test(base)) return null;
+    const tok=(base.match(/\d[\d.\/\-]*[a-z]?/gi)||[])
+      .filter(x=>!/^\d{1,4}[\-.\/]\d{1,2}[\-.\/]\d{2,4}$/.test(x) && x.replace(/\D/g,'').length<=8);
+    return tok.length ? tok[tok.length-1].replace(/[.\-\/]+$/,'') : null;
+  }
+
+  function interpretaDdt(testo, ctx, nomeFile){
+    const t=String(testo||''); const tp=piatto(t);
+    const r={ azienda:null, fornitore_piva:null, fornitore_denominazione:null, numero_ddt:null, data_ddt:null, avvisi:[], fonte:null };
+    if(t.replace(/\s/g,'').length<20){ r.avvisi.push('Nel file non ho trovato testo leggibile: compila i dati a mano.'); return r; }
+
+    // aziende nostre presenti
+    const pive=piveIn(t);
+    const nostre=[...new Set(pive.filter(p=>NOSTRE[p.piva]).map(p=>NOSTRE[p.piva]))];
+    if(!nostre.length){
+      if(/madame\s*pivot/.test(tp)) nostre.push('MADAME PIVOT SRL');
+      if(/spazio\s*lab/.test(tp)) nostre.push('MP SPAZIO LAB SRL');
+    }
+    // ultimo tentativo: l'indirizzo (Madame Pivot: via del Crocifisso, Bagno a Ripoli; MP Spazio Lab: via Bellini, Sieci)
+    if(!nostre.length){
+      if(/crocifiss|bagno\W+a\W+\S{0,3}poli|ripoli/.test(tp)) nostre.push('MADAME PIVOT SRL');
+      else if(/bellini|sieci/.test(tp)) nostre.push('MP SPAZIO LAB SRL');
+    }
+
+    // fornitore: prima P.IVA non nostra che conosciamo, poi per nome, poi prima P.IVA sconosciuta
+    const noti=new Map(ctx.fornitori.filter(f=>f.piva).map(f=>[String(f.piva).replace(/\D/g,'').slice(-11), f]));
+    const altre=pive.filter(p=>!NOSTRE[p.piva]);
+    let forn=altre.map(p=>noti.get(p.piva)).find(Boolean) || null;
+    // firma imparata (per i DDT dove nome e P.IVA del fornitore sono solo nel logo)
+    if(!forn && !altre.length){
+      let best=null;
+      for(const m of Object.values(ctx.modelli)){ const sc=firmaCorrisponde(t, m.firma); if(sc && (!best || sc>best.sc)) best={sc,m}; }
+      if(best) forn={ piva:best.m.fornitore_piva, nome:best.m.fornitore_denominazione };
+    }
+    if(!forn){
+      let best=null;
+      const VUOTE=['srl','spa','sas','snc','srls','societa','soc','della','delle','dello','italia','group','calzature','pelli','pellami','accessori','commerciale','industria'];
+      for(const f of ctx.fornitori){
+        // le nostre aziende compaiono come destinatario o destinazione: dal solo nome non sono il fornitore
+        if(NOSTRE[String(f.piva||'').replace(/\D/g,'').slice(-11)] || /madame\s*pivot|spazio\s*lab/i.test(f.nome||'')) continue;
+        const parole=soloParole(f.nome).split(' ').filter(w=>w.length>=3 && !['di','del','dei','e','c','s','a'].includes(w));
+        for(let k=0;k<parole.length-1;k++){
+          const [a,b]=[parole[k],parole[k+1]];
+          if(VUOTE.includes(a) && VUOTE.includes(b)) continue;
+          if((a+b).length<8) continue;
+          const i=tp.search(new RegExp('\\b'+reEsc(a)+'\\W+(?:[a-z]{1,3}\\W+)?'+reEsc(b)+'\\b'));
+          if(i>=0 && (!best || i<best.i)) best={i,f};
+        }
+      }
+      forn=best?.f||null;
+    }
+    if(forn){ r.fornitore_piva=forn.piva?String(forn.piva).replace(/\D/g,'').slice(-11):null; r.fornitore_denominazione=forn.nome; }
+    else if(altre[0]){ r.fornitore_piva=altre[0].piva; r.avvisi.push('Fornitore nuovo: scrivi il nome, dalla prossima volta lo riconosco.'); }
+    else r.avvisi.push('Fornitore non riconosciuto.');
+
+    const stesso = a => (r.fornitore_piva && String(a.fornitore_piva||'').replace(/\D/g,'').endsWith(r.fornitore_piva))
+                     || (!r.fornitore_piva && r.fornitore_denominazione && a.fornitore_denominazione===r.fornitore_denominazione);
+    const modello = r.fornitore_piva ? ctx.modelli[r.fornitore_piva] : null;
+
+    // 1) DDT attesi di questo fornitore presenti nel testo
+    const date=new Set(dateIn(t).map(d=>d.iso));
+    // i DDT "nostri" (Rif. VS DDT, conto lavorazione) citati nelle fatture non sono DDT da ricevere
+    const suoi=ctx.attesi.filter(a=>a.aperto && !a.ddt_nostro && stesso(a));
+    let candidati=suoi.filter(a=>posNumero(t,a.numero_ddt)>=0)
+      .map(a=>({a, conData: a.data_ddt && date.has(a.data_ddt)}))
+      .sort((x,y)=>(y.conData?1:0)-(x.conData?1:0));
+    // l'OCR a volte attacca un carattere al numero ("8527/1 |" letto "8527/11"): accetto se coincide anche la data
+    if(!candidati.length) candidati=suoi.filter(a=>a.data_ddt && date.has(a.data_ddt) && posNumero(t,a.numero_ddt,true)>=0).map(a=>({a,conData:true}));
+    // sigla stampata lontano dal numero ("BC 1017" scritto "BC DOC. TRASPORTO 1017"): basta il numero se la data coincide
+    if(!candidati.length) candidati=suoi.filter(a=>a.data_ddt && date.has(a.data_ddt) && a.numero_chiave && /\d/.test(a.numero_chiave) && posNumero(t,a.numero_chiave)>=0).map(a=>({a,conData:true}));
+    if(candidati.length && (candidati[0].conData || !candidati[0].a.data_ddt)){
+      const a=candidati[0].a;
+      r.numero_ddt=a.numero_ddt; r.data_ddt=a.data_ddt; r.fonte='attesi';
+      if(!r.azienda && nostre.length!==1) r.azienda=a.azienda;
+    }
+    // 2) modello imparato
+    if(!r.numero_ddt && modello){
+      r.numero_ddt=valoreDaAncora(t, modello.ancora_numero, 'numero');
+      r.data_ddt=valoreDaAncora(t, modello.ancora_data, 'data');
+      if(r.numero_ddt) r.fonte='modello';
+    }
+    // 3) tabella di intestazione
+    if(!r.numero_ddt){
+      const tb=numeroDaTabella(t);
+      if(tb){ r.numero_ddt=tb.numero; r.data_ddt=r.data_ddt||tb.data; r.fonte='generico'; }
+    }
+    // 4) regole generiche
+    if(!r.numero_ddt){
+      const g=numeroGenerico(t);
+      if(g){ r.numero_ddt=g.numero; r.data_ddt=r.data_ddt||dataGenerica(t,g.index); r.fonte='generico'; }
+    }
+    // 5) nome del file
+    if(!r.numero_ddt){
+      const n=numeroDaNomeFile(nomeFile);
+      if(n){
+        const a=suoi.find(x=>x.numero_chiave && x.numero_chiave===chiave(n));
+        if(a){ r.numero_ddt=a.numero_ddt; r.data_ddt=a.data_ddt||r.data_ddt; r.fonte='attesi'; }
+        else { r.numero_ddt=n; r.fonte='nome_file'; r.avvisi.push('Numero preso dal nome del file: controllalo.'); }
+      }
+    }
+    if(!r.data_ddt) r.data_ddt=dataGenerica(t,null);
+
+    // azienda
+    if(!r.azienda){
+      if(nostre.length===1) r.azienda=nostre[0];
+      else if(modello?.azienda_predefinita) r.azienda=modello.azienda_predefinita;
+    }
+    if(!r.azienda) r.avvisi.push(nostre.length>1? 'Nel DDT ci sono entrambe le aziende: scegli quella giusta.' : 'Azienda non riconosciuta: sceglila.');
+    if(!r.numero_ddt) r.avvisi.push('Numero DDT non trovato: scrivilo. Se è stampato, dalla prossima volta per questo fornitore lo trovo da solo; se è scritto a mano va sempre inserito a mano.');
+    else if(r.fonte==='generico') r.avvisi.push('Numero e data trovati con regole generiche: controllali.');
+    return r;
+  }
+
+  function unisciFirma(vecchia, nuove){
+    let v=vecchia; if(typeof v==='string'){ try{ v=JSON.parse(v); }catch{ v=null; } }
+    if(!Array.isArray(v) || !v.length) return nuove.slice(0,40);
+    const comuni=v.filter(x=>nuove.includes(x));
+    return (comuni.length>=3 ? comuni : nuove).slice(0,40);
+  }
+  // dopo la conferma: impara dove questo fornitore scrive numero e data
+  function imparaModello(testo, d, vecchio){
+    if(!d.fornitore_piva || !testo) return null;
+    const t=String(testo);
+    const an=ancoraPer(t, posNumero(t, d.numero_ddt));
+    let ad=null;
+    if(d.data_ddt){
+      const dd=dateIn(t).find(x=>x.iso===d.data_ddt);
+      if(dd) ad=ancoraPer(t, dd.index);
+    }
+    return {
+      fornitore_piva: String(d.fornitore_piva).replace(/\D/g,'').slice(-11),
+      fornitore_denominazione: d.fornitore_denominazione || vecchio?.fornitore_denominazione || null,
+      ancora_numero: an ? JSON.stringify(an) : (vecchio?.ancora_numero ?? null),
+      ancora_data: ad ? JSON.stringify(ad) : (vecchio?.ancora_data ?? null),
+      azienda_predefinita: d.azienda || vecchio?.azienda_predefinita || null,
+      // firma: parole del modulo, unite a quelle gia' imparate e tenute solo se ricorrono
+      firma: JSON.stringify(unisciFirma(vecchio?.firma, paroleFirma(t))),
+      esempi: (vecchio?.esempi||0)+1,
+      aggiornato_il: new Date().toISOString(),
+    };
+  }
+  // </lettore> =====================================================================
+
+  function caricaScript(src){ return new Promise((ok,ko)=>{ const s=document.createElement('script'); s.src=src; s.onload=ok; s.onerror=()=>ko(new Error('impossibile caricare '+src)); document.head.appendChild(s); }); }
+  async function pdfjs(){
+    if(!window.pdfjsLib){
+      await caricaScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+    return window.pdfjsLib;
+  }
+  let _ocr=null;
+  async function ocrSemplice(immagine){
+    if(!window.Tesseract) await caricaScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js');
+    if(!_ocr) _ocr=await window.Tesseract.createWorker('ita');
+    const { data } = await _ocr.recognize(immagine);
+    return data.text||'';
+  }
+  function ruota(cv, gradi){
+    const out=document.createElement('canvas'); const dritto=gradi%180===0;
+    out.width=dritto?cv.width:cv.height; out.height=dritto?cv.height:cv.width;
+    const g=out.getContext('2d'); g.translate(out.width/2,out.height/2); g.rotate(gradi*Math.PI/180); g.drawImage(cv,-cv.width/2,-cv.height/2);
+    return out;
+  }
+  // OCR che prova anche la pagina capovolta o girata di lato, se il testo letto non ha senso
+  async function ocr(immagine){
+    let cv=immagine;
+    if(!(immagine instanceof HTMLCanvasElement)){
+      const bmp=await createImageBitmap(immagine); cv=document.createElement('canvas'); cv.width=bmp.width; cv.height=bmp.height; cv.getContext('2d').drawImage(bmp,0,0);
+    }
+    let meglio={t:await ocrSemplice(cv)}; meglio.q=qualitaTesto(meglio.t);
+    for(const gradi of [180,90,270]){
+      if(meglio.q>=8) break;
+      const t=await ocrSemplice(ruota(cv,gradi)), q=qualitaTesto(t);
+      if(q>meglio.q) meglio={t,q};
+    }
+    return meglio.t;
+  }
+  // ricostruisce le righe del PDF dalla posizione delle scritte
+  function righeDaItems(items){
+    const rows=[];
+    for(const it of items){ if(!it.str || !it.str.trim()) continue;
+      const x=it.transform[4], y=it.transform[5];
+      let r=rows.find(r=>Math.abs(r.y-y)<=3); if(!r){ r={y,items:[]}; rows.push(r); } r.items.push({x,str:it.str,w:it.width||0}); }
+    rows.sort((a,b)=>b.y-a.y);
+    return rows.map(r=>{ r.items.sort((a,b)=>a.x-b.x); let out='', fine=null;
+      for(const i of r.items){ if(fine!==null) out += (i.x-fine>12 ? '   ' : ' '); out+=i.str.trim(); fine=i.x+i.w; }
+      return out; }).join('\n');
+  }
+  async function testoDaFile(blob){
+    const buf=new Uint8Array(await blob.arrayBuffer());
+    if(buf[0]===0x25 && buf[1]===0x50 && buf[2]===0x44 && buf[3]===0x46){
+      const lib=await pdfjs(); const pdf=await lib.getDocument({data:buf}).promise;
+      let testo='';
+      for(let p=1;p<=Math.min(pdf.numPages,3);p++){ const pg=await pdf.getPage(p); testo+=righeDaItems((await pg.getTextContent()).items)+'\n'; }
+      if(testo.replace(/\s/g,'').length>=60) return testo;
+      // PDF scansionato: leggo le immagini delle pagine con l'OCR
+      let t='';
+      for(let p=1;p<=Math.min(pdf.numPages,2);p++){
+        const pg=await pdf.getPage(p); const vp=pg.getViewport({scale:2.2});
+        const cv=document.createElement('canvas'); cv.width=vp.width; cv.height=vp.height;
+        await pg.render({canvasContext:cv.getContext('2d'), viewport:vp}).promise;
+        t+=await ocr(cv)+'\n';
+      }
+      return t;
+    }
+    return await ocr(blob);
+  }
+  function modelloLetto(m){ const j=v=>{ try{ return v? JSON.parse(v):null; }catch{ return null; } }; return {...m, ancora_numero:j(m.ancora_numero), ancora_data:j(m.ancora_data), firma:j(m.firma)}; }
+  function contesto(){
+    const f=new Map(), add=(piva,nome)=>{ if(!piva && !nome) return; const k=piva? String(piva).replace(/\D/g,'').slice(-11) : nome; if(!f.has(k) || (nome && !f.get(k).nome)) f.set(k,{piva:piva?k:null,nome}); };
+    for(const a of attesi) add(a.fornitore_piva, a.fornitore_denominazione);
+    for(const d of archivio) add(d.fornitore_piva, d.fornitore_denominazione);
+    for(const m of Object.values(modelli)) add(m.fornitore_piva, m.fornitore_denominazione);
+    for(const x of fornitoriFatture) add(x.piva, x.nome);
+    const mod={}; for(const [k,m] of Object.entries(modelli)) mod[k]=modelloLetto(m);
+    return { fornitori:[...f.values()], modelli:mod, attesi:attesi.map(a=>({...a, aperto:!fatto(a)})) };
+  }
+  function elencoFornitori(){ return contesto().fornitori.filter(f=>f.nome).sort((a,b)=>a.nome.localeCompare(b.nome,'it')); }
+  function riempiListaFornitori(){
+    const l=elencoFornitori();
+    $('lista-fornitori').innerHTML=l.map(f=>`<option value="${esc(f.nome)}">${esc(f.piva||'')}</option>`).join('');
+    $('lista-pive').innerHTML=l.filter(f=>f.piva).map(f=>`<option value="${esc(f.piva)}">${esc(f.nome)}</option>`).join('');
+  }
+  async function leggiLocale(d, file, rileggi=false){
+    inLettura.add(d.id);
+    try{
+      let testo = (!file && d.testo_letto && !rileggi) ? d.testo_letto : null;
+      if(!testo){
+        let blob=file;
+        if(!blob){ const { data, error } = await supabase.storage.from(BUCKET).download(d.file_path); if(error) throw error; blob=data; }
+        testo=await testoDaFile(blob);
+      }
+      const x=interpretaDdt(testo, contesto(), d.file_nome);
+      const agg={ stato:'da_confermare', testo_letto:testo.slice(0,30000), avviso_lettura:x.avvisi.join(' ')||null, dati_letti:{ versione:VERSIONE, fonte:x.fonte } };
+      for(const k of ['azienda','fornitore_piva','fornitore_denominazione','numero_ddt','data_ddt']) if(x[k]) agg[k]=x[k];
+      const { data, error } = await supabase.from('ddt_ricevuti').update(agg).eq('id',d.id).neq('stato','protocollato').select('*').maybeSingle();
+      if(error) throw error;
+      return { ok:true, ddt:data };   // data e' null se nel frattempo e' gia' stato protocollato
+    }catch(e){
+      const m=e.message||String(e);
+      await supabase.from('ddt_ricevuti').update({ stato:'da_confermare', avviso_lettura:'Lettura non riuscita ('+m+'): compila i dati a mano.' }).eq('id',d.id).eq('stato','in_lettura');
+      return { ok:false, errore:m };
+    }finally{ inLettura.delete(d.id); }
+  }
+  // documenti arrivati via email (o caricamenti interrotti): li leggo uno alla volta
+  let leggendo=false;
+  async function leggiInAttesa(){
+    if(leggendo) return; leggendo=true;
+    try{
+      for(const d of coda.filter(x=>x.stato==='in_lettura' && !inLettura.has(x.id) && !inCaricamento.has(x.id))){
+        if(inLettura.has(d.id) || inCaricamento.has(d.id)) continue;
+        const r=await leggiLocale(d); aggiornaUna(r.ddt||null, d.id);
+      }
+    }finally{ leggendo=false; }
+  }
+  async function impara(d){
+    try{
+      if(!d?.testo_letto || !d.fornitore_piva || !d.numero_ddt) return;
+      const piva=String(d.fornitore_piva).replace(/\D/g,'').slice(-11);
+      const m=imparaModello(d.testo_letto, d, modelli[piva]); if(!m) return;
+      const { error } = await supabase.from('ddt_modelli').upsert(m);
+      if(!error) modelli[piva]=m;
+    }catch{ /* imparare e' un di piu': se non riesce il protocollo resta valido */ }
+  }
+
+  /* ---------------- DDT attesi ---------------- */
+  async function caricaAttesi(){
+    const tutti=[];
+    for(let da=0;;da+=1000){
+      const { data, error } = await supabase.from('ddt_riferimenti_fatture')
+        .select('*, ddt:ddt_ricevuti(protocollo,file_path)').order('fornitore_denominazione').order('data_ddt').range(da,da+999);
+      if(error){ $('attesi').innerHTML=`<div class="empty danger">Errore: ${esc(error.message)}</div>`; return; }
+      tutti.push(...data); if(data.length<1000) break;
+    }
+    attesi=tutti;
+    // prima volta: l'elenco e' vuoto, lo riempio dalle fatture
+    if(!attesi.length && !primoAggiornamento){ primoAggiornamento=true; return aggiornaAttesi(); }
+    renderAttesi(); if(!modificato) renderCoda();
+  }
+  async function aggiornaAttesi(){
+    const b=$('btn-aggiorna-attesi'); b.disabled=true; b.textContent='Leggo le fatture…';
+    try{
+      const { data, error } = await supabase.functions.invoke(FUNZIONE,{ body:{ azione:'aggiorna_attesi' } });
+      if(error){ let m=error.message; try{ m=(await error.context.json()).errore||m; }catch{} throw new Error(m); }
+      toast(`Elenco aggiornato: ${data.nuovi} nuovi DDT attesi, ${data.abbinati} spuntati`);
+    }catch(e){ toast('Aggiornamento non riuscito: '+e.message); }
+    b.disabled=false; b.textContent='Aggiorna dalle fatture';
+    const { data } = await supabase.from('ddt_riferimenti_fatture').select('*, ddt:ddt_ricevuti(protocollo,file_path)').order('fornitore_denominazione').order('data_ddt').range(0,4999);
+    attesi=data||[]; renderAttesi(); if(!modificato) renderCoda();
+  }
+  const fatto = r => !!(r.ddt_ricevuto_id || r.smarcato_manuale);
+  function renderAttesi(){
+    const q=$('cerca-attesi').value.trim().toLowerCase(), nostri=$('mostra-nostri').checked;
+    const base=attesi.filter(r=>(!filtroAz||r.azienda===filtroAz) && (nostri || !r.ddt_nostro));
+    const nFatti=base.filter(fatto).length;
+    $('t-attesi').textContent=base.length-nFatti;
+    $('riepilogo').innerHTML=`<div class="box"><b>${base.length}</b><span>DDT attesi</span></div>
+      <div class="box"><b class="stato-ok">${nFatti}</b><span>spuntati</span></div>
+      <div class="box"><b>${base.length-nFatti}</b><span>da ricevere</span></div>`;
+    const lista=base.filter(r=> (filtroStato==='tutti' || (filtroStato==='fatti')===fatto(r))
+      && (!q || [r.fornitore_denominazione,r.numero_ddt,r.fattura_numero,r.ddt?.protocollo].some(x=>(x||'').toLowerCase().includes(q))));
+    if(!lista.length){ $('attesi').innerHTML=`<div class="empty">${attesi.length?'Nessun DDT con questi filtri.':'Elenco vuoto: premi "Aggiorna dalle fatture".'}</div>`; return; }
+    $('attesi').innerHTML=`<table class="arch"><thead><tr>
+      <th></th><th>Fornitore</th><th>DDT n.</th><th>Data DDT</th><th>Azienda</th><th class="hide-s">Fattura</th><th>Stato</th>
+    </tr></thead><tbody>${lista.map(r=>`<tr class="${fatto(r)?'fatto':''}" data-id="${r.id}">
+      <td><input type="checkbox" class="spunta" ${fatto(r)?'checked':''} ${r.ddt_ricevuto_id?'disabled title="Spuntato in automatico dal protocollo"':''}></td>
+      <td class="forn">${esc(r.fornitore_denominazione||'')}${r.ddt_nostro?' <span class="chip">nostro DDT</span>':''}</td>
+      <td class="mono">${esc(r.numero_ddt)}</td>
+      <td>${dataIt(r.data_ddt)}</td>
+      <td>${chipAz(r.azienda)}</td>
+      <td class="hide-s small muted" title="${esc(r.testo||'')}">n. ${esc(r.fattura_numero||'')} del ${dataIt(r.fattura_data)}</td>
+      <td>${r.ddt_ricevuto_id?`<a href="#" class="stato-ok a-prot" data-path="${esc(r.ddt?.file_path||'')}">✓ ${esc(r.ddt?.protocollo||'protocollato')}</a>`
+            : r.smarcato_manuale?'<span class="stato-ok">✓ a mano</span>':'<span class="muted">da ricevere</span>'}</td>
+    </tr>`).join('')}</tbody></table>`;
+  }
+  $('attesi').addEventListener('change', async e=>{
+    if(!e.target.classList.contains('spunta')) return;
+    const id=e.target.closest('tr').dataset.id, v=e.target.checked;
+    const { error } = await supabase.from('ddt_riferimenti_fatture').update({ smarcato_manuale:v }).eq('id',id);
+    if(error){ e.target.checked=!v; return alert('Errore: '+error.message); }
+    const r=attesi.find(x=>x.id===id); if(r) r.smarcato_manuale=v; renderAttesi();
+  });
+  $('attesi').addEventListener('click', e=>{ const a=e.target.closest('.a-prot'); if(a){ e.preventDefault(); if(a.dataset.path) apriFile(a.dataset.path); } });
+  $('btn-aggiorna-attesi').addEventListener('click', aggiornaAttesi);
+  $('cerca-attesi').addEventListener('input', renderAttesi);
+  $('mostra-nostri').addEventListener('change', renderAttesi);
+  $('filtro-stato').addEventListener('click', e=>{
+    const b=e.target.closest('button'); if(!b) return; filtroStato=b.dataset.s;
+    $('filtro-stato').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b)); renderAttesi();
+  });
+  $('tabs').addEventListener('click', e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    $('tabs').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+    $('tab-carica').style.display = b.dataset.t==='carica' ? '' : 'none';
+    $('tab-attesi').style.display = b.dataset.t==='attesi' ? '' : 'none';
+  });
+
+  /* ---------------- caricamento file ---------------- */
+  const ACCETTATI=/\.(pdf|jpe?g|png|webp)$/i;
+  async function caricaFile(files){
+    files=[...files].filter(f=>ACCETTATI.test(f.name));
+    if(!files.length){ toast('Nessun PDF o immagine da caricare'); return; }
+    const p=$('progress'), log=$('prog-log'); p.style.display='block'; log.innerHTML='';
+    let fatti=0; const tot=files.length, daLeggere=[];
+    const passo=(msg)=>{ $('prog-text').textContent=msg; $('prog-bar').style.width=Math.round(fatti/tot*100)+'%'; };
+    const riga=(t,cls='')=>{ const li=document.createElement('li'); li.textContent=t; if(cls) li.className=cls; log.prepend(li); };
+    for(const f of files){
+      passo(`Carico ${fatti+1} di ${tot}: ${f.name}`);
+      try{
+        const impronta=await sha256(f);
+        const { data:gia } = await supabase.from('ddt_ricevuti').select('id,protocollo,stato').eq('impronta',impronta).neq('stato','scartato').maybeSingle();
+        if(gia){ riga(`${f.name}: già presente ${gia.protocollo?'('+gia.protocollo+')':'(da confermare)'}`,'muted'); fatti++; continue; }
+        const mese=new Date().toISOString().slice(0,7);
+        const path=`caricati/${mese}/${Date.now()}_${f.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+        const { error:up } = await supabase.storage.from(BUCKET).upload(path,f,{contentType:f.type||'application/pdf'});
+        if(up) throw up;
+        const { data:ins, error:ie } = await supabase.from('ddt_ricevuti').insert({ file_path:path, file_nome:f.name, file_tipo:f.type||null, impronta, origine:'caricamento' }).select('id').single();
+        if(ie){ await supabase.storage.from(BUCKET).remove([path]); throw ie; }
+        inCaricamento.add(ins.id);
+        daLeggere.push({id:ins.id, nome:f.name, file:f});
+      }catch(err){ riga(`${f.name}: errore ${err.message||err}`,'danger'); }
+      fatti++;
+    }
+    await carica();
+    // lettura gratuita, uno alla volta (l'OCR delle scansioni impegna il computer)
+    let letti=0; const totL=daLeggere.length;
+    for(const x of daLeggere){
+      $('prog-text').textContent=`Leggo i DDT: ${letti+1} di ${totL}… (le scansioni richiedono qualche secondo)`;
+      const d=coda.find(c=>c.id===x.id) || {id:x.id};
+      const r=await leggiLocale(d, x.file); letti++; inCaricamento.delete(x.id);
+      riga(r.ok? `${x.nome}: letto` : `${x.nome}: da completare a mano (${r.errore})`, r.ok?'':'danger');
+      $('prog-bar').style.width=Math.round(letti/Math.max(totL,1)*100)+'%';
+      aggiornaUna(r.ddt||null, x.id);
+    }
+    $('prog-text').textContent=`Fatto: ${tot} file, ${totL} nuovi da confermare.`;
+    await carica();
+  }
+  function aggiornaUna(d,id){ const i=coda.findIndex(x=>x.id===(d?.id||id)); if(d && i>=0){ coda[i]=d; renderCoda(); } }
+
+  $('btn-file').addEventListener('click',e=>{ e.stopPropagation(); $('in-file').click(); });
+  $('btn-cartella').addEventListener('click',e=>{ e.stopPropagation(); $('in-cartella').click(); });
+  $('drop').addEventListener('click',()=>$('in-file').click());
+  $('in-file').addEventListener('change',e=>{ caricaFile(e.target.files); e.target.value=''; });
+  $('in-cartella').addEventListener('change',e=>{ caricaFile(e.target.files); e.target.value=''; });
+  let dd=0;
+  window.addEventListener('dragenter',e=>{ if(e.dataTransfer?.types?.includes('Files')){dd++;document.body.classList.add('dragging');} });
+  window.addEventListener('dragleave',()=>{ if(--dd<=0){dd=0;document.body.classList.remove('dragging');} });
+  window.addEventListener('dragover',e=>e.preventDefault());
+  window.addEventListener('drop',e=>{ e.preventDefault(); dd=0; document.body.classList.remove('dragging'); if($('app-screen').style.display==='block') caricaFile(e.dataTransfer.files); });
+
+  /* ---------------- coda da confermare ---------------- */
+  const CAMPI=[
+    ['fornitore_denominazione','Fornitore','w2'],['fornitore_piva','P.IVA fornitore',''],['numero_ddt','Numero DDT',''],
+    ['data_ddt','Data DDT','', 'date'],['causale_trasporto','Causale',''],['riferimento_ordine','Rif. ordine','w2'],
+    ['note','Note','w4'],
+  ];
+  let renderCoda = function(){
+    const lista=coda.filter(d=>!filtroAz || d.azienda===filtroAz || !d.azienda);
+    $('n-coda').textContent=lista.length;
+    $('btn-prot-tutti').style.display = lista.some(d=>d.stato==='da_confermare' && completo(d)) ? '' : 'none';
+    if(!lista.length){ $('coda').innerHTML='<div class="empty">Niente da confermare. Trascina dei DDT qui sopra, oppure inviali a <b>madamepivotdocuments@gmail.com</b> con oggetto <b>DDT</b>.</div>'; return; }
+    $('coda').innerHTML=lista.map(d=>{
+      const busy=d.stato==='in_lettura';
+      return `<div class="qcard ${busy?'busy':completo(d)?'ok':'warn'}" data-id="${d.id}">
+        <div class="qtop">
+          <span class="fname">${esc(d.file_nome||d.file_path)}</span>
+          ${d.origine==='email'?`<span class="chip email" title="${esc(d.email_mittente||'')}">via email</span>`:''}
+          ${busy?'<span class="chip">da leggere…</span>':''}
+          <span class="muted small">${quando(d.creato_il)}</span>
+          <span style="flex:1"></span>
+          <button class="btn btn-ghost btn-sm a-apri">Vedi PDF</button>
+        </div>
+        ${d.avviso_lettura?`<div class="avviso">${esc(d.avviso_lettura)}</div>`:''}
+        ${busy?'':msgAtteso(d)}
+        <div class="qgrid">
+          <div class="field"><label>Azienda</label>
+            <select class="input f" data-k="azienda">
+              <option value="">— scegli —</option>
+              ${Object.keys(AZ).map(a=>`<option value="${a}" ${d.azienda===a?'selected':''}>${AZ[a]==='MP'?'Madame Pivot':'MP Spazio Lab'}</option>`).join('')}
+            </select></div>
+          ${CAMPI.map(([k,l,w,t])=>`<div class="field ${w}"><label>${l}</label><input class="input f ${k==='numero_ddt'||k==='fornitore_piva'?'mono':''}" data-k="${k}" type="${t||'text'}" value="${esc(d[k]||'')}"${k==='fornitore_denominazione'?' list="lista-fornitori" placeholder="Scrivi per cercare…" autocomplete="off"':k==='fornitore_piva'?' list="lista-pive" autocomplete="off"':''}></div>`).join('')}
+        </div>
+        ${(d.righe||[]).length?`<details class="righe"><summary>${d.righe.length} righe articolo</summary><table>${d.righe.map(r=>`<tr><td class="mono">${esc(r.codice)}</td><td>${esc(r.descrizione)}</td><td style="text-align:right">${esc(r.quantita)} ${esc(r.unita_misura)}</td></tr>`).join('')}</table></details>`:''}
+        <div class="qacts">
+          <button class="btn btn-primary btn-sm a-prot" ${busy?'disabled':''}>Protocolla e archivia</button>
+          <button class="btn btn-ghost btn-sm a-salva">Salva</button>
+          <button class="btn btn-ghost btn-sm a-rileggi">Rileggi</button>
+          <span class="sp"></span>
+          <button class="btn btn-ghost btn-sm danger a-scarta">Scarta</button>
+        </div>
+      </div>`;
+    }).join('');
+  };
+  function valori(card){
+    const o={}; card.querySelectorAll('.f').forEach(i=>{ o[i.dataset.k]=i.value.trim()||null; }); return o;
+  }
+  async function salva(id, card){
+    const v=valori(card);
+    const { data, error } = await supabase.from('ddt_ricevuti').update(v).eq('id',id).select('*').single();
+    if(error) throw error;
+    const i=coda.findIndex(x=>x.id===id); if(i>=0) coda[i]=data; return data;
+  }
+  async function protocolla(id){
+    const { data, error } = await supabase.rpc('protocolla_ddt',{ p_id:id });
+    if(error) throw error; return data;
+  }
+  $('coda').addEventListener('click', async e=>{
+    const card=e.target.closest('.qcard'); if(!card) return; const id=card.dataset.id; const d=coda.find(x=>x.id===id);
+    const btn=e.target.closest('button'); if(!btn) return;
+    try{
+      if(btn.classList.contains('a-apri')) return apriFile(d.file_path, d.file_nome);
+      if(btn.classList.contains('a-salva')){ await salva(id,card); renderCoda(); return toast('Salvato'); }
+      if(btn.classList.contains('a-prot')){
+        btn.disabled=true; const s=await salva(id,card);
+        if(!s.azienda){ btn.disabled=false; return toast('Scegli l\'azienda'); }
+        if(!s.numero_ddt || !s.fornitore_denominazione){ if(!confirm('Mancano fornitore o numero DDT. Protocollare lo stesso?')){ btn.disabled=false; return; } }
+        const prot=await protocolla(id); await impara(s); toast(await messaggioDopo(id, `✓ Protocollato ${prot}`)); return carica();
+      }
+      if(btn.classList.contains('a-rileggi')){
+        btn.disabled=true; btn.textContent='Leggo…';
+        const r=await leggiLocale(d, null, true); if(!r.ok) toast('Lettura non riuscita: '+r.errore);
+        return carica();
+      }
+      if(btn.classList.contains('a-scarta')){
+        if(!confirm('Scartare questo documento? Il file resta in archivio ma non viene protocollato.')) return;
+        const { error } = await supabase.from('ddt_ricevuti').update({stato:'scartato'}).eq('id',id); if(error) throw error;
+        toast('Scartato'); return carica();
+      }
+    }catch(err){ btn.disabled=false; alert('Errore: '+(err.message||err)); }
+  });
+  $('btn-prot-tutti').addEventListener('click', async ()=>{
+    const pronti=coda.filter(d=>d.stato==='da_confermare' && completo(d) && (!filtroAz||d.azienda===filtroAz));
+    if(!confirm(`Protocollo ${pronti.length} DDT completi (azienda, fornitore, numero e data presenti)?\nLe modifiche non salvate nelle schede vengono salvate prima.`)) return;
+    const b=$('btn-prot-tutti'); b.disabled=true; let ok=0;
+    for(const d of pronti){
+      const card=document.querySelector(`.qcard[data-id="${d.id}"]`);
+      try{ const s2=card? await salva(d.id,card) : d; await protocolla(d.id); await impara(s2); ok++; }catch(err){ toast(`${d.file_nome}: ${err.message}`); }
+    }
+    const { count } = await supabase.from('ddt_riferimenti_fatture').select('id',{count:'exact',head:true}).in('ddt_ricevuto_id',pronti.map(d=>d.id));
+    b.disabled=false; toast(`✓ Protocollati ${ok} DDT · ${count||0} spuntati tra i DDT attesi`); carica();
+  });
+
+  /* ---------------- abbinamento ai DDT attesi ---------------- */
+  const pivaN = p => String(p||'').replace(/\D/g,'').slice(-11);
+  function atteseCorrispondenti(d){
+    if(!d.numero_ddt || !d.azienda) return [];
+    const k=chiave(d.numero_ddt), p=pivaN(d.fornitore_piva);
+    return attesi.filter(a=>!a.ddt_nostro && a.azienda===d.azienda && a.numero_chiave===k
+      && (!a.data_ddt || !d.data_ddt || a.data_ddt===d.data_ddt)
+      && (p ? pivaN(a.fornitore_piva)===p : (a.fornitore_denominazione||'').toLowerCase()===(d.fornitore_denominazione||'').toLowerCase()));
+  }
+  const descrFattura = a => `fattura n. ${a.fattura_numero||'?'} del ${dataIt(a.fattura_data)}`;
+  function msgAtteso(d){
+    if(!d.numero_ddt) return '';
+    const m=atteseCorrispondenti(d);
+    if(!m.length) return `<div class="abbinato no">Questo DDT non è tra quelli attesi dalle fatture (può arrivare prima della fattura).</div>`;
+    const aperti=m.filter(a=>!fatto(a));
+    if(!aperti.length) return `<div class="abbinato">✓ DDT atteso dalla ${esc(descrFattura(m[0]))}, già spuntato.</div>`;
+    return `<div class="abbinato">✓ È uno dei DDT attesi: ${aperti.map(a=>esc(descrFattura(a))).join(', ')}. Protocollandolo verrà spuntato.</div>`;
+  }
+  // dopo protocollo o modifica: dico quali DDT attesi sono stati spuntati
+  async function messaggioDopo(id, prima){
+    const { data } = await supabase.from('ddt_riferimenti_fatture').select('fattura_numero,fattura_data').eq('ddt_ricevuto_id',id);
+    const n=(data||[]).length;
+    return n ? `${prima} · spuntato tra i DDT attesi (${data.map(descrFattura).join(', ')})` : `${prima} · non era tra i DDT attesi`;
+  }
+
+  /* ---------------- archivio ---------------- */
+  let inModifica=null;
+  // filtri per colonna e ordinamento dell'archivio
+  const fa={ prot:'', az:'', forn:'', num:'', anno:'', mese:'' };
+  let ordine={ col:'protocollato_il', dir:-1 };
+  const MESI=['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
+  const COLONNE=[
+    {k:'protocollo', t:'Protocollo', v:d=>d.protocollo||''},
+    {k:'azienda', t:'Azienda', v:d=>d.azienda||''},
+    {k:'fornitore_denominazione', t:'Fornitore', v:d=>(d.fornitore_denominazione||'').toLowerCase()},
+    {k:'numero_ddt', t:'DDT n.', v:d=>{ const c=chiave(d.numero_ddt); return c? c.padStart(12,'0') : ''; }},
+    {k:'data_ddt', t:'Data DDT', v:d=>d.data_ddt||''},
+    {k:'protocollato_il', t:'Protocollato', v:d=>d.protocollato_il||'', cls:'hide-s'},
+  ];
+  function scheletroArchivio(){
+    if($('arch-tab')) return;
+    $('archivio').innerHTML=`<table class="arch" id="arch-tab"><thead>
+      <tr>${COLONNE.map(c=>`<th class="ord ${c.cls||''}" data-col="${c.k}">${c.t}<span class="fr"></span></th>`).join('')}<th></th></tr>
+      <tr class="filtri">
+        <th><input class="input af" data-f="prot" placeholder="MP-2026…"></th>
+        <th><select class="input af" data-f="az"><option value="">Tutte</option><option value="MADAME PIVOT SRL">Madame Pivot</option><option value="MP SPAZIO LAB SRL">MP Spazio Lab</option></select></th>
+        <th><select class="input af" data-f="forn" id="af-forn"><option value="">Tutti i fornitori</option></select></th>
+        <th><input class="input af mono" data-f="num" placeholder="n."></th>
+        <th><div class="anno-mese"><select class="input af" data-f="anno" id="af-anno"><option value="">Anno</option></select>
+             <select class="input af" data-f="mese"><option value="">Mese</option>${MESI.map((m,i)=>`<option value="${String(i+1).padStart(2,'0')}">${m}</option>`).join('')}</select></div></th>
+        <th class="hide-s"></th><th></th>
+      </tr></thead><tbody id="arch-corpo"></tbody></table>
+      <div class="empty" id="arch-vuoto" style="display:none;margin-top:10px"></div>`;
+  }
+  function opzioni(sel, valori, etichettaVuota){
+    const cur=sel.value;
+    sel.innerHTML=`<option value="">${etichettaVuota}</option>`+valori.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+    sel.value = valori.includes(cur) ? cur : '';
+  }
+  function renderArchivio(){
+    scheletroArchivio();
+    opzioni($('af-forn'), [...new Set(archivio.map(d=>d.fornitore_denominazione).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'it')), 'Tutti i fornitori');
+    opzioni($('af-anno'), [...new Set(archivio.map(d=>(d.data_ddt||'').slice(0,4)).filter(Boolean))].sort().reverse(), 'Anno');
+    for(const k of Object.keys(fa)){ const el=document.querySelector(`.af[data-f="${k}"]`); if(el) fa[k]=el.value.trim(); }
+    const q=$('cerca').value.trim().toLowerCase();
+    const contiene=(x,y)=>(x||'').toLowerCase().includes(y.toLowerCase());
+    let lista=archivio.filter(d=>(!filtroAz||d.azienda===filtroAz)
+      && (!q || [d.protocollo,d.fornitore_denominazione,d.numero_ddt,d.fornitore_piva,d.file_nome].some(x=>contiene(x,q)))
+      && (!fa.prot || contiene(d.protocollo,fa.prot))
+      && (!fa.az || d.azienda===fa.az)
+      && (!fa.forn || d.fornitore_denominazione===fa.forn)
+      && (!fa.num || contiene(d.numero_ddt,fa.num) || (chiave(fa.num) && chiave(d.numero_ddt)===chiave(fa.num)))
+      && (!fa.anno || (d.data_ddt||'').startsWith(fa.anno))
+      && (!fa.mese || (d.data_ddt||'').slice(5,7)===fa.mese));
+    const col=COLONNE.find(c=>c.k===ordine.col)||COLONNE[5];
+    lista.sort((a,b)=>{ const x=col.v(a), y=col.v(b); return (x<y?-1:x>y?1:0)*ordine.dir; });
+    document.querySelectorAll('#arch-tab th.ord').forEach(th=>{ const on=th.dataset.col===ordine.col; th.classList.toggle('on',on); th.querySelector('.fr').textContent= on ? (ordine.dir>0?'▲':'▼') : '↕'; });
+    const filtrato = !!q || Object.values(fa).some(Boolean);
+    $('arch-azzera').style.display = filtrato ? 'inline-block' : 'none';
+    $('n-arch').textContent = filtrato ? `${lista.length} di ${archivio.length}` : archivio.length;
+    $('arch-vuoto').style.display = lista.length ? 'none' : '';
+    $('arch-vuoto').textContent = archivio.length ? 'Nessun DDT con questi filtri.' : 'Nessun DDT protocollato.';
+    $('arch-corpo').innerHTML=lista.map(d=>`<tr data-id="${d.id}">
+      <td class="mono">${esc(d.protocollo)}</td>
+      <td>${chipAz(d.azienda)}</td>
+      <td>${esc(d.fornitore_denominazione||'')}${d.fornitore_piva?`<div class="muted small mono">${esc(d.fornitore_piva)}</div>`:''}</td>
+      <td class="mono">${d.numero_ddt?esc(d.numero_ddt):'<span class="danger small">manca</span>'}</td>
+      <td>${dataIt(d.data_ddt)}</td>
+      <td class="hide-s small muted">${quando(d.protocollato_il)}${d.origine==='email'?' · email':''}</td>
+      <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm a-apri">Vedi PDF</button> <button class="btn btn-ghost btn-sm a-mod">Modifica</button></td>
+    </tr>${inModifica===d.id?`<tr class="modifica" data-id="${d.id}"><td colspan="7">
+      <div class="mod-grid">
+        <div class="field"><label>Fornitore</label><input class="input m" data-k="fornitore_denominazione" list="lista-fornitori" autocomplete="off" value="${esc(d.fornitore_denominazione||'')}"></div>
+        <div class="field"><label>P.IVA</label><input class="input m mono" data-k="fornitore_piva" list="lista-pive" autocomplete="off" value="${esc(d.fornitore_piva||'')}"></div>
+        <div class="field"><label>Numero DDT</label><input class="input m mono" data-k="numero_ddt" value="${esc(d.numero_ddt||'')}"></div>
+        <div class="field"><label>Data DDT</label><input class="input m" type="date" data-k="data_ddt" value="${esc(d.data_ddt||'')}"></div>
+      </div>
+      <div class="qacts"><button class="btn btn-primary btn-sm a-mod-salva">Salva</button><button class="btn btn-ghost btn-sm a-mod-annulla">Annulla</button>
+      <span class="muted small">Protocollo e azienda non si cambiano.</span></div>
+    </td></tr>`:''}`).join('');
+  }
+  $('archivio').addEventListener('input', e=>{ if(e.target.classList.contains('af')) renderArchivio(); });
+  $('archivio').addEventListener('click', e=>{
+    const th=e.target.closest('th.ord'); if(!th) return;
+    ordine = ordine.col===th.dataset.col ? {col:ordine.col, dir:-ordine.dir} : {col:th.dataset.col, dir: (th.dataset.col==='fornitore_denominazione'||th.dataset.col==='azienda') ? 1 : -1};
+    renderArchivio();
+  });
+  $('arch-azzera').addEventListener('click', ()=>{ document.querySelectorAll('.af').forEach(el=>el.value=''); $('cerca').value=''; renderArchivio(); });
+  $('archivio').addEventListener('click', async e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    const id=b.closest('tr').dataset.id, d=archivio.find(x=>x.id===id);
+    if(b.classList.contains('a-apri')) return apriFile(d.file_path, d.file_nome);
+    if(b.classList.contains('a-mod')){ inModifica = inModifica===id ? null : id; return renderArchivio(); }
+    if(b.classList.contains('a-mod-annulla')){ inModifica=null; return renderArchivio(); }
+    if(b.classList.contains('a-mod-salva')){
+      const riga=b.closest('tr'), v={};
+      riga.querySelectorAll('.m').forEach(i=>{ v[i.dataset.k]=i.value.trim()||null; });
+      if(v.fornitore_piva) v.fornitore_piva=pivaN(v.fornitore_piva)||v.fornitore_piva;
+      b.disabled=true;
+      const { error } = await supabase.from('ddt_ricevuti').update(v).eq('id',id);
+      if(error){ b.disabled=false; return alert('Errore: '+error.message); }
+      await supabase.rpc('abbina_ddt');
+      await impara({...d, ...v, testo_letto:(await supabase.from('ddt_ricevuti').select('testo_letto').eq('id',id).single()).data?.testo_letto});
+      inModifica=null; toast(await messaggioDopo(id, `✓ ${d.protocollo} aggiornato`)); return carica();
+    }
+  });
+  // nel modulo di modifica: fornitore dall'elenco -> P.IVA (e viceversa)
+  $('archivio').addEventListener('change', e=>{
+    const i=e.target; if(!i.classList.contains('m')) return;
+    const riga=i.closest('tr'), campo=k=>riga.querySelector(`.m[data-k="${k}"]`);
+    if(i.dataset.k==='fornitore_denominazione'){ const f=elencoFornitori().find(x=>x.nome.toLowerCase()===i.value.trim().toLowerCase()); if(f&&f.piva) campo('fornitore_piva').value=f.piva; }
+    if(i.dataset.k==='fornitore_piva'){ const f=elencoFornitori().find(x=>x.piva===pivaN(i.value)); if(f){ i.value=f.piva; if(!campo('fornitore_denominazione').value.trim()) campo('fornitore_denominazione').value=f.nome; } }
+  });
+  $('cerca').addEventListener('input',renderArchivio);
+  $('filtro-az').addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(!b) return; filtroAz=b.dataset.f;
+    $('filtro-az').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b)); renderCoda(); renderArchivio(); renderAttesi();
+  });
+
+  /* ---------------- visualizzatore PDF/immagini dentro il programma ---------------- */
+  let urlAperto=null;
+  async function apriFile(path, nome){
+    $('v-titolo').textContent=nome||path.split('/').pop(); $('v-corpo').innerHTML='<div class="empty" style="margin:auto">Apro il documento…</div>';
+    $('viewer').classList.add('on');
+    const { data, error } = await supabase.storage.from(BUCKET).download(path);
+    if(error){ $('v-corpo').innerHTML=`<div class="empty danger" style="margin:auto">Errore: ${esc(error.message)}</div>`; return; }
+    const buf=new Uint8Array(await data.slice(0,4).arrayBuffer());
+    const pdf=buf[0]===0x25&&buf[1]===0x50, tipo=pdf?'application/pdf':(data.type||'image/jpeg');
+    if(urlAperto) URL.revokeObjectURL(urlAperto);
+    urlAperto=URL.createObjectURL(new Blob([data],{type:tipo}));
+    $('v-scarica').href=urlAperto; $('v-scarica').download=nome||'ddt'+(pdf?'.pdf':'.jpg');
+    $('v-corpo').innerHTML = pdf ? `<iframe src="${urlAperto}" title="Documento"></iframe>` : `<img src="${urlAperto}" alt="Documento">`;
+  }
+  function chiudiViewer(){ $('viewer').classList.remove('on'); $('v-corpo').innerHTML=''; }
+  $('v-chiudi').addEventListener('click',chiudiViewer);
+  $('viewer').addEventListener('click',e=>{ if(e.target.id==='viewer') chiudiViewer(); });
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape' && $('viewer').classList.contains('on')) chiudiViewer(); });
+
+  // i DDT arrivati via email compaiono da soli
+  // (solo se non stai modificando una scheda, per non perdere quello che hai scritto)
+  let modificato=false;
+  $('coda').addEventListener('input',()=>{ modificato=true; });
+  $('coda').addEventListener('change', e=>{
+    const card=e.target.closest('.qcard'); if(!card || !e.target.classList.contains('f')) return;
+    const d={...coda.find(x=>x.id===card.dataset.id), ...Object.fromEntries([...card.querySelectorAll('.f')].map(i=>[i.dataset.k,i.value.trim()||null]))};
+    const vecchio=card.querySelector('.abbinato'); const html=msgAtteso(d);
+    if(vecchio) vecchio.outerHTML=html||''; else if(html) card.querySelector('.qgrid').insertAdjacentHTML('beforebegin',html);
+  });
+  // fornitore scelto dall'elenco: compilo la P.IVA (e viceversa)
+  $('coda').addEventListener('change', e=>{
+    const i=e.target; if(!i.classList.contains('f')) return;
+    const card=i.closest('.qcard'), campo=k=>card.querySelector(`.f[data-k="${k}"]`);
+    if(i.dataset.k==='fornitore_denominazione'){
+      const f=elencoFornitori().find(x=>x.nome && x.nome.toLowerCase()===i.value.trim().toLowerCase());
+      if(f && f.piva) campo('fornitore_piva').value=f.piva;
+    }
+    if(i.dataset.k==='fornitore_piva'){
+      const p=i.value.replace(/\D/g,'').slice(-11);
+      const f=elencoFornitori().find(x=>x.piva===p);
+      if(f){ i.value=p; if(!campo('fornitore_denominazione').value.trim()) campo('fornitore_denominazione').value=f.nome; }
+    }
+  });
+  const _render=renderCoda; renderCoda=function(){ modificato=false; _render(); };
+  setInterval(()=>{ if($('app-screen').style.display==='block' && !document.hidden && !modificato) carica(); }, 60000);
+</script>
+</body>
+</html>

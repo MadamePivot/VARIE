@@ -122,6 +122,7 @@
   .mod-grid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px 10px;align-items:end}
   .mod-grid .field{margin:0}
   @media (max-width:760px){ .mod-grid{grid-template-columns:1fr 1fr} }
+  .versione{font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:500;color:var(--accent);background:var(--accent-bg);border-radius:6px;padding:2px 7px;vertical-align:middle;margin-left:6px}
   #toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;opacity:0;pointer-events:none;transition:all .25s;z-index:50}
   #toast.show{opacity:1;transform:translateX(-50%)}
   @media (max-width:760px){ .qgrid{grid-template-columns:1fr 1fr} #drop{flex-wrap:wrap} #drop .acts{margin-left:0} table.arch .hide-s{display:none} }
@@ -132,6 +133,7 @@
   <div class="login-card">
     <div class="eyebrow">Madame Pivot · MP Spazio Lab</div>
     <h1>DDT ricevuti</h1>
+    <p class="muted small" id="versione-login" style="margin:-18px 0 18px"></p>
     <form id="login-form">
       <div class="field"><label for="email">Email</label><input class="input" type="email" id="email" required autocomplete="username"></div>
       <div class="field"><label for="password">Password</label><input class="input" type="password" id="password" required autocomplete="current-password"></div>
@@ -144,7 +146,7 @@
 <div id="app-screen">
   <header>
     <div class="head-in">
-      <div class="brand"><span class="eyebrow">Madame Pivot · MP Spazio Lab</span><h1>DDT ricevuti</h1></div>
+      <div class="brand"><span class="eyebrow">Madame Pivot · MP Spazio Lab</span><h1>DDT ricevuti <span class="versione" id="versione"></span></h1></div>
       <div class="grow"></div>
       <div class="seg" id="filtro-az">
         <button data-f="" class="on">Tutte</button>
@@ -220,6 +222,9 @@
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF3ZXhpcWljdWJhbm1vZGFlYnVhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NTk4MjUsImV4cCI6MjA5OTUzNTgyNX0.Z24OBYkn5SDO41IbfJYljO7yua6d_FNB4_rj5agnDPs';
   const BUCKET = 'ddt-ricevuti';
   const FUNZIONE = 'ddt-ricevuti';
+  // VERSIONE DEL PROGRAMMA: si vede in alto e resta registrata su ogni DDT letto
+  const VERSIONE = 'v2';
+  const VERSIONE_DATA = '31/10/2026';
   const AZ = { 'MADAME PIVOT SRL':'MP', 'MP SPAZIO LAB SRL':'LAB' };
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   const $ = id => document.getElementById(id);
@@ -238,6 +243,8 @@
   /* ---------------- login ---------------- */
   function showApp(){ $('login-screen').style.display='none'; $('app-screen').style.display='block'; carica(); }
   function showLogin(){ $('login-screen').style.display='flex'; $('app-screen').style.display='none'; }
+  document.title = `DDT ricevuti ${VERSIONE}`;
+  $('versione').textContent = VERSIONE; $('versione-login').textContent = `Versione ${VERSIONE} · ${VERSIONE_DATA}`; $('versione').title = `Versione ${VERSIONE} del ${VERSIONE_DATA}`;
   supabase.auth.getSession().then(({data})=> data.session ? showApp() : showLogin());
   supabase.auth.onAuthStateChange((e,s)=>{ if(e==='SIGNED_OUT') showLogin(); else if(e==='SIGNED_IN' && $('app-screen').style.display!=='block') showApp(); });
   $('login-form').addEventListener('submit', async e=>{
@@ -653,7 +660,7 @@
         testo=await testoDaFile(blob);
       }
       const x=interpretaDdt(testo, contesto(), d.file_nome);
-      const agg={ stato:'da_confermare', testo_letto:testo.slice(0,30000), avviso_lettura:x.avvisi.join(' ')||null };
+      const agg={ stato:'da_confermare', testo_letto:testo.slice(0,30000), avviso_lettura:x.avvisi.join(' ')||null, dati_letti:{ versione:VERSIONE, fonte:x.fonte } };
       for(const k of ['azienda','fornitore_piva','fornitore_denominazione','numero_ddt','data_ddt']) if(x[k]) agg[k]=x[k];
       const { data, error } = await supabase.from('ddt_ricevuti').update(agg).eq('id',d.id).neq('stato','protocollato').select('*').maybeSingle();
       if(error) throw error;
