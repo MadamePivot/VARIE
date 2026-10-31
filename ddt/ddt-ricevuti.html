@@ -215,7 +215,7 @@
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   const $ = id => document.getElementById(id);
 
-  let coda = [], archivio = [], attesi = [], modelli = {}, fornitoriFatture = [], inLettura = new Set(), filtroAz = '', filtroStato = 'aperti', primoAggiornamento = false;
+  let coda = [], archivio = [], attesi = [], modelli = {}, fornitoriFatture = [], inLettura = new Set(), inCaricamento = new Set(), filtroAz = '', filtroStato = 'aperti', primoAggiornamento = false;
 
   /* ---------------- utilità ---------------- */
   function esc(s){ const d=document.createElement('div'); d.textContent=s??''; return d.innerHTML; }
@@ -309,9 +309,12 @@
     const sopra=testo.slice(testo.lastIndexOf('\n',fineSopra-1)+1, fineSopra);
     const et=soloParole(sopra); if(!et) return null;
     const rigaVal=testo.slice(inizioRiga, (testo.indexOf('\n',pos)+1||testo.length+1)-1);
-    const col=rigaVal.slice(0,pos-inizioRiga).trim().split(/\s+/).filter(Boolean).length;
-    return { t:'sotto', etichetta:et.slice(0,60), col };
+    const col=pezzi(rigaVal.slice(0,pos-inizioRiga)).length;
+    // posizione rispetto alla data della stessa riga: resta giusta anche se cambiano gli altri campi
+    const di=pezzi(rigaVal).findIndex(x=>dateIn(x).length);
+    return { t:'sotto', etichetta:et.slice(0,60), col, rel: di>=0 && di!==col ? col-di : null };
   }
+  const pezzi = r => String(r).split(/[\s|\[\]]+/).filter(Boolean);
   function valoreDaAncora(testo, a, tipo){
     if(!a) return null;
     if(a.t==='riga'){
@@ -328,9 +331,13 @@
       const righe=testo.split('\n');
       for(let i=0;i<righe.length-1;i++){
         if(!soloParole(righe[i]).includes(a.etichetta.slice(0,20))) continue;
-        const tok=righe[i+1].trim().split(/\s+/);
-        if(tipo==='data'){ const d=dateIn(tok.slice(a.col).join(' '))[0]; if(d) return d.iso; }
-        else if(tok[a.col] && /\d/.test(tok[a.col])) return tok[a.col].replace(/[.\-\/]+$/,'');
+        const tok=pezzi(righe[i+1]);
+        const di=tok.findIndex(x=>dateIn(x).length);
+        if(tipo==='data'){ const d=dateIn(tok.slice(a.col).join(' '))[0] || dateIn(righe[i+1])[0]; if(d) return d.iso; }
+        else {
+          const v = (a.rel!=null && di>=0) ? tok[di+a.rel] : tok[a.col];
+          if(v && /\d/.test(v)) return v.replace(/[.\-\/]+$/,'');
+        }
       }
     }
     return null;
@@ -602,9 +609,9 @@
       const x=interpretaDdt(testo, contesto(), d.file_nome);
       const agg={ stato:'da_confermare', testo_letto:testo.slice(0,30000), avviso_lettura:x.avvisi.join(' ')||null };
       for(const k of ['azienda','fornitore_piva','fornitore_denominazione','numero_ddt','data_ddt']) if(x[k]) agg[k]=x[k];
-      const { data, error } = await supabase.from('ddt_ricevuti').update(agg).eq('id',d.id).neq('stato','protocollato').select('*').single();
+      const { data, error } = await supabase.from('ddt_ricevuti').update(agg).eq('id',d.id).neq('stato','protocollato').select('*').maybeSingle();
       if(error) throw error;
-      return { ok:true, ddt:data };
+      return { ok:true, ddt:data };   // data e' null se nel frattempo e' gia' stato protocollato
     }catch(e){
       const m=e.message||String(e);
       await supabase.from('ddt_ricevuti').update({ stato:'da_confermare', avviso_lettura:'Lettura non riuscita ('+m+'): compila i dati a mano.' }).eq('id',d.id).eq('stato','in_lettura');
@@ -616,7 +623,8 @@
   async function leggiInAttesa(){
     if(leggendo) return; leggendo=true;
     try{
-      for(const d of coda.filter(x=>x.stato==='in_lettura' && !inLettura.has(x.id))){
+      for(const d of coda.filter(x=>x.stato==='in_lettura' && !inLettura.has(x.id) && !inCaricamento.has(x.id))){
+        if(inLettura.has(d.id) || inCaricamento.has(d.id)) continue;
         const r=await leggiLocale(d); aggiornaUna(r.ddt||null, d.id);
       }
     }finally{ leggendo=false; }
@@ -724,6 +732,7 @@
         if(up) throw up;
         const { data:ins, error:ie } = await supabase.from('ddt_ricevuti').insert({ file_path:path, file_nome:f.name, file_tipo:f.type||null, impronta, origine:'caricamento' }).select('id').single();
         if(ie){ await supabase.storage.from(BUCKET).remove([path]); throw ie; }
+        inCaricamento.add(ins.id);
         daLeggere.push({id:ins.id, nome:f.name, file:f});
       }catch(err){ riga(`${f.name}: errore ${err.message||err}`,'danger'); }
       fatti++;
@@ -734,7 +743,7 @@
     for(const x of daLeggere){
       $('prog-text').textContent=`Leggo i DDT: ${letti+1} di ${totL}… (le scansioni richiedono qualche secondo)`;
       const d=coda.find(c=>c.id===x.id) || {id:x.id};
-      const r=await leggiLocale(d, x.file); letti++;
+      const r=await leggiLocale(d, x.file); letti++; inCaricamento.delete(x.id);
       riga(r.ok? `${x.nome}: letto` : `${x.nome}: da completare a mano (${r.errore})`, r.ok?'':'danger');
       $('prog-bar').style.width=Math.round(letti/Math.max(totL,1)*100)+'%';
       aggiornaUna(r.ddt||null, x.id);
