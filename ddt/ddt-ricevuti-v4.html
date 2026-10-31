@@ -223,7 +223,7 @@
   const BUCKET = 'ddt-ricevuti';
   const FUNZIONE = 'ddt-ricevuti';
   // VERSIONE DEL PROGRAMMA: si vede in alto e resta registrata su ogni DDT letto
-  const VERSIONE = 'v3';
+  const VERSIONE = 'v4';
   const VERSIONE_DATA = '31/10/2026';
   const AZ = { 'MADAME PIVOT SRL':'MP', 'MP SPAZIO LAB SRL':'LAB' };
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -286,6 +286,13 @@
   const piatto = s => String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
   const soloParole = s => piatto(s).replace(/[^a-z°º]+/g,' ').trim();
 
+  // toglie i blocchi destinatario/destinazione: i nomi che ci sono (noi, terzisti) non sono il fornitore
+  const RE_DEST=/destinazion|destinatari|\bspett|luogo\s+(?:di\s+)?consegna|intestatario|cessionario|\bcliente\s*:/;
+  function senzaDestinazioni(testo){
+    const righe=String(testo||'').split('\n'); const via=new Set();
+    righe.forEach((r,i)=>{ if(RE_DEST.test(piatto(r))) for(let k=i;k<=i+3 && k<righe.length;k++) via.add(k); });
+    return righe.filter((r,i)=>!via.has(i)).join('\n');
+  }
   function dateIn(testo){
     const out=[]; RE_DATA.lastIndex=0; let m;
     while((m=RE_DATA.exec(testo))){
@@ -396,7 +403,7 @@
     'fiscale partita anagrafico italia totale quantita spett cliente fornitore merce data pagina numero luogo mezzo cessionario cedente '+
     'mittente scatole cartoni vista assegnato franco consegna ritiri sconti sconto importo valuta magazzino principale unita misura').split(' '));
   function paroleFirma(testo){
-    const w=soloParole(testo).split(' ').filter(x=>x.length>=5 && !COMUNI.has(x));
+    const w=soloParole(senzaDestinazioni(testo)).split(' ').filter(x=>x.length>=5 && !COMUNI.has(x));
     return [...new Set(w)];
   }
   function firmaCorrisponde(testo, firma){
@@ -452,7 +459,8 @@
 
     // fornitore: prima P.IVA non nostra che conosciamo, poi per nome, poi prima P.IVA sconosciuta
     const noti=new Map(ctx.fornitori.filter(f=>f.piva).map(f=>[String(f.piva).replace(/\D/g,'').slice(-11), f]));
-    const altre=pive.filter(p=>!NOSTRE[p.piva]);
+    const fuoriDest=new Set(piveIn(senzaDestinazioni(t)).map(p=>p.piva));
+    const altre=pive.filter(p=>!NOSTRE[p.piva]).sort((a,b)=>(fuoriDest.has(b.piva)?1:0)-(fuoriDest.has(a.piva)?1:0));
     let forn=altre.map(p=>noti.get(p.piva)).find(Boolean) || null;
     // firma imparata (per i DDT dove nome e P.IVA del fornitore sono solo nel logo)
     if(!forn && !altre.length){
@@ -460,6 +468,8 @@
       for(const m of Object.values(ctx.modelli)){ const sc=firmaCorrisponde(t, m.firma); if(sc && (!best || sc>best.sc)) best={sc,m}; }
       if(best) forn={ piva:best.m.fornitore_piva, nome:best.m.fornitore_denominazione };
     }
+    const tpFornitore=piatto(senzaDestinazioni(t));
+    let perNome=false;
     if(!forn){
       let best=null;
       const VUOTE=['srl','spa','sas','snc','srls','societa','soc','della','delle','dello','italia','group','calzature','pelli','pellami','accessori','commerciale','industria'];
@@ -471,13 +481,14 @@
           const [a,b]=[parole[k],parole[k+1]];
           if(VUOTE.includes(a) && VUOTE.includes(b)) continue;
           if((a+b).length<8) continue;
-          const i=tp.search(new RegExp('\\b'+reEsc(a)+'\\W+(?:[a-z]{1,3}\\W+)?'+reEsc(b)+'\\b'));
+          const i=tpFornitore.search(new RegExp('\\b'+reEsc(a)+'\\W+(?:[a-z]{1,3}\\W+)?'+reEsc(b)+'\\b'));
           if(i>=0 && (!best || i<best.i)) best={i,f};
         }
       }
-      forn=best?.f||null;
+      forn=best?.f||null; perNome=!!forn;
     }
-    if(forn){ r.fornitore_piva=forn.piva?String(forn.piva).replace(/\D/g,'').slice(-11):null; r.fornitore_denominazione=forn.nome; }
+    if(forn){ r.fornitore_piva=forn.piva?String(forn.piva).replace(/\D/g,'').slice(-11):null; r.fornitore_denominazione=forn.nome;
+      if(perNome) r.avvisi.push('Fornitore riconosciuto solo dal nome scritto nel documento: controllalo.'); }
     else if(altre[0]){ r.fornitore_piva=altre[0].piva; r.avvisi.push('Fornitore nuovo: scrivi il nome, dalla prossima volta lo riconosco.'); }
     else r.avvisi.push('Fornitore non riconosciuto.');
 
