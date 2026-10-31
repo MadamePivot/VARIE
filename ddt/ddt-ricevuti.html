@@ -455,7 +455,8 @@
 
     // 1) DDT attesi di questo fornitore presenti nel testo
     const date=new Set(dateIn(t).map(d=>d.iso));
-    const suoi=ctx.attesi.filter(a=>a.aperto && stesso(a));
+    // i DDT "nostri" (Rif. VS DDT, conto lavorazione) citati nelle fatture non sono DDT da ricevere
+    const suoi=ctx.attesi.filter(a=>a.aperto && !a.ddt_nostro && stesso(a));
     let candidati=suoi.filter(a=>posNumero(t,a.numero_ddt)>=0)
       .map(a=>({a, conData: a.data_ddt && date.has(a.data_ddt)}))
       .sort((x,y)=>(y.conData?1:0)-(x.conData?1:0));
@@ -873,7 +874,7 @@
   function atteseCorrispondenti(d){
     if(!d.numero_ddt || !d.azienda) return [];
     const k=chiave(d.numero_ddt), p=pivaN(d.fornitore_piva);
-    return attesi.filter(a=>a.azienda===d.azienda && a.numero_chiave===k
+    return attesi.filter(a=>!a.ddt_nostro && a.azienda===d.azienda && a.numero_chiave===k
       && (!a.data_ddt || !d.data_ddt || a.data_ddt===d.data_ddt)
       && (p ? pivaN(a.fornitore_piva)===p : (a.fornitore_denominazione||'').toLowerCase()===(d.fornitore_denominazione||'').toLowerCase()));
   }
