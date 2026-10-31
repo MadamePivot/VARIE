@@ -110,6 +110,15 @@
   #viewer .head .t{flex:1;font-weight:600;word-break:break-all}
   #viewer iframe, #viewer img{flex:1;width:100%;border:0;background:#525659;object-fit:contain}
   tr.modifica td{background:#FBFAF7}
+  table.arch th.ord{cursor:pointer;user-select:none;white-space:nowrap}
+  table.arch th.ord:hover{color:var(--ink)}
+  table.arch th.ord .fr{opacity:.35;margin-left:3px}
+  table.arch th.ord.on{color:var(--accent)} table.arch th.ord.on .fr{opacity:1}
+  table.arch tr.filtri th{padding:6px 8px;background:#FCFBF9}
+  table.arch tr.filtri .input{padding:6px 8px;font-size:13px;border-radius:7px;text-transform:none;letter-spacing:0;font-weight:400}
+  .anno-mese{display:flex;gap:4px;min-width:170px}
+  .anno-mese select{flex:1;min-width:80px;padding-right:4px}
+  #arch-azzera{display:none}
   .mod-grid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px 10px;align-items:end}
   .mod-grid .field{margin:0}
   @media (max-width:760px){ .mod-grid{grid-template-columns:1fr 1fr} }
@@ -173,7 +182,7 @@
 
     <div class="section-title">
       <h2>Archivio protocollati</h2><span class="n" id="n-arch">0</span><span class="sp"></span>
-      <div class="tools"><input class="input" id="cerca" type="search" placeholder="Cerca fornitore, numero, protocollo…"></div>
+      <div class="tools"><button class="btn btn-ghost btn-sm" id="arch-azzera">Togli filtri</button><input class="input" id="cerca" type="search" placeholder="Cerca fornitore, numero, protocollo…"></div>
     </div>
     <div id="archivio"></div>
   </main>
@@ -886,14 +895,62 @@
 
   /* ---------------- archivio ---------------- */
   let inModifica=null;
+  // filtri per colonna e ordinamento dell'archivio
+  const fa={ prot:'', az:'', forn:'', num:'', anno:'', mese:'' };
+  let ordine={ col:'protocollato_il', dir:-1 };
+  const MESI=['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
+  const COLONNE=[
+    {k:'protocollo', t:'Protocollo', v:d=>d.protocollo||''},
+    {k:'azienda', t:'Azienda', v:d=>d.azienda||''},
+    {k:'fornitore_denominazione', t:'Fornitore', v:d=>(d.fornitore_denominazione||'').toLowerCase()},
+    {k:'numero_ddt', t:'DDT n.', v:d=>{ const c=chiave(d.numero_ddt); return c? c.padStart(12,'0') : ''; }},
+    {k:'data_ddt', t:'Data DDT', v:d=>d.data_ddt||''},
+    {k:'protocollato_il', t:'Protocollato', v:d=>d.protocollato_il||'', cls:'hide-s'},
+  ];
+  function scheletroArchivio(){
+    if($('arch-tab')) return;
+    $('archivio').innerHTML=`<table class="arch" id="arch-tab"><thead>
+      <tr>${COLONNE.map(c=>`<th class="ord ${c.cls||''}" data-col="${c.k}">${c.t}<span class="fr"></span></th>`).join('')}<th></th></tr>
+      <tr class="filtri">
+        <th><input class="input af" data-f="prot" placeholder="MP-2026…"></th>
+        <th><select class="input af" data-f="az"><option value="">Tutte</option><option value="MADAME PIVOT SRL">Madame Pivot</option><option value="MP SPAZIO LAB SRL">MP Spazio Lab</option></select></th>
+        <th><select class="input af" data-f="forn" id="af-forn"><option value="">Tutti i fornitori</option></select></th>
+        <th><input class="input af mono" data-f="num" placeholder="n."></th>
+        <th><div class="anno-mese"><select class="input af" data-f="anno" id="af-anno"><option value="">Anno</option></select>
+             <select class="input af" data-f="mese"><option value="">Mese</option>${MESI.map((m,i)=>`<option value="${String(i+1).padStart(2,'0')}">${m}</option>`).join('')}</select></div></th>
+        <th class="hide-s"></th><th></th>
+      </tr></thead><tbody id="arch-corpo"></tbody></table>
+      <div class="empty" id="arch-vuoto" style="display:none;margin-top:10px"></div>`;
+  }
+  function opzioni(sel, valori, etichettaVuota){
+    const cur=sel.value;
+    sel.innerHTML=`<option value="">${etichettaVuota}</option>`+valori.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+    sel.value = valori.includes(cur) ? cur : '';
+  }
   function renderArchivio(){
+    scheletroArchivio();
+    opzioni($('af-forn'), [...new Set(archivio.map(d=>d.fornitore_denominazione).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'it')), 'Tutti i fornitori');
+    opzioni($('af-anno'), [...new Set(archivio.map(d=>(d.data_ddt||'').slice(0,4)).filter(Boolean))].sort().reverse(), 'Anno');
+    for(const k of Object.keys(fa)){ const el=document.querySelector(`.af[data-f="${k}"]`); if(el) fa[k]=el.value.trim(); }
     const q=$('cerca').value.trim().toLowerCase();
-    const lista=archivio.filter(d=>(!filtroAz||d.azienda===filtroAz) && (!q || [d.protocollo,d.fornitore_denominazione,d.numero_ddt,d.fornitore_piva,d.file_nome].some(x=>(x||'').toLowerCase().includes(q))));
-    $('n-arch').textContent=lista.length;
-    if(!lista.length){ $('archivio').innerHTML='<div class="empty">Nessun DDT protocollato'+(q?' con questa ricerca':'')+'.</div>'; return; }
-    $('archivio').innerHTML=`<table class="arch"><thead><tr>
-      <th>Protocollo</th><th>Azienda</th><th>Fornitore</th><th>DDT n.</th><th>Data DDT</th><th class="hide-s">Protocollato</th><th></th>
-    </tr></thead><tbody>${lista.map(d=>`<tr data-id="${d.id}">
+    const contiene=(x,y)=>(x||'').toLowerCase().includes(y.toLowerCase());
+    let lista=archivio.filter(d=>(!filtroAz||d.azienda===filtroAz)
+      && (!q || [d.protocollo,d.fornitore_denominazione,d.numero_ddt,d.fornitore_piva,d.file_nome].some(x=>contiene(x,q)))
+      && (!fa.prot || contiene(d.protocollo,fa.prot))
+      && (!fa.az || d.azienda===fa.az)
+      && (!fa.forn || d.fornitore_denominazione===fa.forn)
+      && (!fa.num || contiene(d.numero_ddt,fa.num) || (chiave(fa.num) && chiave(d.numero_ddt)===chiave(fa.num)))
+      && (!fa.anno || (d.data_ddt||'').startsWith(fa.anno))
+      && (!fa.mese || (d.data_ddt||'').slice(5,7)===fa.mese));
+    const col=COLONNE.find(c=>c.k===ordine.col)||COLONNE[5];
+    lista.sort((a,b)=>{ const x=col.v(a), y=col.v(b); return (x<y?-1:x>y?1:0)*ordine.dir; });
+    document.querySelectorAll('#arch-tab th.ord').forEach(th=>{ const on=th.dataset.col===ordine.col; th.classList.toggle('on',on); th.querySelector('.fr').textContent= on ? (ordine.dir>0?'▲':'▼') : '↕'; });
+    const filtrato = !!q || Object.values(fa).some(Boolean);
+    $('arch-azzera').style.display = filtrato ? 'inline-block' : 'none';
+    $('n-arch').textContent = filtrato ? `${lista.length} di ${archivio.length}` : archivio.length;
+    $('arch-vuoto').style.display = lista.length ? 'none' : '';
+    $('arch-vuoto').textContent = archivio.length ? 'Nessun DDT con questi filtri.' : 'Nessun DDT protocollato.';
+    $('arch-corpo').innerHTML=lista.map(d=>`<tr data-id="${d.id}">
       <td class="mono">${esc(d.protocollo)}</td>
       <td>${chipAz(d.azienda)}</td>
       <td>${esc(d.fornitore_denominazione||'')}${d.fornitore_piva?`<div class="muted small mono">${esc(d.fornitore_piva)}</div>`:''}</td>
@@ -910,8 +967,15 @@
       </div>
       <div class="qacts"><button class="btn btn-primary btn-sm a-mod-salva">Salva</button><button class="btn btn-ghost btn-sm a-mod-annulla">Annulla</button>
       <span class="muted small">Protocollo e azienda non si cambiano.</span></div>
-    </td></tr>`:''}`).join('')}</tbody></table>`;
+    </td></tr>`:''}`).join('');
   }
+  $('archivio').addEventListener('input', e=>{ if(e.target.classList.contains('af')) renderArchivio(); });
+  $('archivio').addEventListener('click', e=>{
+    const th=e.target.closest('th.ord'); if(!th) return;
+    ordine = ordine.col===th.dataset.col ? {col:ordine.col, dir:-ordine.dir} : {col:th.dataset.col, dir: (th.dataset.col==='fornitore_denominazione'||th.dataset.col==='azienda') ? 1 : -1};
+    renderArchivio();
+  });
+  $('arch-azzera').addEventListener('click', ()=>{ document.querySelectorAll('.af').forEach(el=>el.value=''); $('cerca').value=''; renderArchivio(); });
   $('archivio').addEventListener('click', async e=>{
     const b=e.target.closest('button'); if(!b) return;
     const id=b.closest('tr').dataset.id, d=archivio.find(x=>x.id===id);
