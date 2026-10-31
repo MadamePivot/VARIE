@@ -462,6 +462,11 @@
     const fuoriDest=new Set(piveIn(senzaDestinazioni(t)).map(p=>p.piva));
     const altre=pive.filter(p=>!NOSTRE[p.piva]).sort((a,b)=>(fuoriDest.has(b.piva)?1:0)-(fuoriDest.has(a.piva)?1:0));
     let forn=altre.map(p=>noti.get(p.piva)).find(Boolean) || null;
+    // l'OCR a volte sbaglia una cifra della P.IVA: accetto un fornitore conosciuto che differisce di una sola cifra
+    if(!forn){
+      const unaCifra=(a,b)=>{ let d=0; for(let i=0;i<11;i++) if(a[i]!==b[i] && ++d>1) return false; return d===1; };
+      for(const p of altre){ for(const [k,f] of noti){ if(k.length===11 && unaCifra(p.piva,k)){ forn=f; break; } } if(forn) break; }
+    }
     // firma imparata (per i DDT dove nome e P.IVA del fornitore sono solo nel logo)
     if(!forn && !altre.length){
       let best=null;
