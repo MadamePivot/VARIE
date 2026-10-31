@@ -328,6 +328,25 @@
     return n + 2*Math.min(dateIn(t).length,3) + (piveIn(t).length?2:0);
   }
 
+  // ---- tabella di intestazione: riga con le etichette ("N. documento  Data documento"), sotto i valori.
+  // Il numero e' il valore accanto alla data: prima o dopo, secondo l'ordine delle etichette.
+  function numeroDaTabella(testo){
+    const righe=testo.split('\n');
+    for(let i=1;i<righe.length;i++){
+      const sopra=piatto(righe[i-1]).replace(/\bn(?:r|um)?\.?\s*pag\w*|pagina|pag\./g,' ');
+      if(!/numero|umero|\bnr\b|\bn\b|n°|ocumento/.test(sopra) || !/\bdata\b|ata\s+doc/.test(sopra)) continue;
+      const d=dateIn(righe[i])[0]; if(!d) continue;
+      const prima=righe[i].slice(0,d.index).split(/[\s|\[\]]+/).filter(Boolean);
+      const dopo=righe[i].slice(d.index+d.raw.length).split(/[\s|\[\]]+/).filter(Boolean);
+      const ok=x=>x && /\d/.test(x) && x.replace(/\D/g,'').length<=9 && !/^\d{1,2}[\/.:]\d{1,2}$/.test(x);
+      const iN=sopra.search(/numero|umero|\bnr\b|\bn\b|n°/), iD=sopra.search(/\bdata\b|ata\s+doc/);
+      const tb=prima[prima.length-1], ta=dopo[0];
+      const v=((iN>=0 && iN>iD) ? [ta,tb] : [tb,ta]).find(ok);
+      if(v) return { numero:v.replace(/[.\-\/]+$/,''), data:d.iso };
+    }
+    return null;
+  }
+
   // ---- regole generiche
   function numeroGenerico(testo){
     const re=/(?:d\.?\s?d\.?\s?t\.?|documento\s+di\s+trasporto|doc\.?\s*di\s*trasp\w*|bolla(?:\s+di\s+consegna)?|n(?:umero|r)?\.?\s*doc(?:umento)?\.?)[\s|:.'‘’"]*(?:n(?:r|um(?:ero)?)?\.?\s*|n[°º]\s*)?[\s|:.'‘’"]*([A-Z]{0,4}[\s\/\-]?\d[\w\/\-]{0,15})/i;
@@ -398,6 +417,8 @@
       .sort((x,y)=>(y.conData?1:0)-(x.conData?1:0));
     // l'OCR a volte attacca un carattere al numero ("8527/1 |" letto "8527/11"): accetto se coincide anche la data
     if(!candidati.length) candidati=suoi.filter(a=>a.data_ddt && date.has(a.data_ddt) && posNumero(t,a.numero_ddt,true)>=0).map(a=>({a,conData:true}));
+    // sigla stampata lontano dal numero ("BC 1017" scritto "BC DOC. TRASPORTO 1017"): basta il numero se la data coincide
+    if(!candidati.length) candidati=suoi.filter(a=>a.data_ddt && date.has(a.data_ddt) && a.numero_chiave && /\d/.test(a.numero_chiave) && posNumero(t,a.numero_chiave)>=0).map(a=>({a,conData:true}));
     if(candidati.length && (candidati[0].conData || !candidati[0].a.data_ddt)){
       const a=candidati[0].a;
       r.numero_ddt=a.numero_ddt; r.data_ddt=a.data_ddt; r.fonte='attesi';
@@ -409,7 +430,12 @@
       r.data_ddt=valoreDaAncora(t, modello.ancora_data, 'data');
       if(r.numero_ddt) r.fonte='modello';
     }
-    // 3) regole generiche
+    // 3) tabella di intestazione
+    if(!r.numero_ddt){
+      const tb=numeroDaTabella(t);
+      if(tb){ r.numero_ddt=tb.numero; r.data_ddt=r.data_ddt||tb.data; r.fonte='generico'; }
+    }
+    // 4) regole generiche
     if(!r.numero_ddt){
       const g=numeroGenerico(t);
       if(g){ r.numero_ddt=g.numero; r.data_ddt=r.data_ddt||dataGenerica(t,g.index); r.fonte='generico'; }
