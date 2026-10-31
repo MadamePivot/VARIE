@@ -124,6 +124,8 @@
   .mod-grid .field{margin:0}
   @media (max-width:760px){ .mod-grid{grid-template-columns:1fr 1fr} }
   .versione{font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:500;color:var(--accent);background:var(--accent-bg);border-radius:6px;padding:2px 7px;vertical-align:middle;margin-left:6px}
+  .anno-top{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--ink-2)}
+  .anno-top select{width:auto;padding:6px 28px 6px 10px;font-weight:600;font-size:14px;color:var(--accent-2);background-color:var(--accent-bg);border-color:var(--accent-bg)}
   #toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;opacity:0;pointer-events:none;transition:all .25s;z-index:50}
   #toast.show{opacity:1;transform:translateX(-50%)}
   @media (max-width:760px){ .qgrid{grid-template-columns:1fr 1fr} #drop{flex-wrap:wrap} #drop .acts{margin-left:0} table.arch .hide-s{display:none} }
@@ -149,6 +151,7 @@
     <div class="head-in">
       <div class="brand"><span class="eyebrow">Madame Pivot · MP Spazio Lab</span><h1>DDT ricevuti <span class="versione" id="versione"></span></h1></div>
       <div class="grow"></div>
+      <label class="anno-top" title="Anno dei DDT: gli anni non si mescolano mai">Anno <select class="input" id="anno-globale"></select></label>
       <div class="seg" id="filtro-az">
         <button data-f="" class="on">Tutte</button>
         <button data-f="MADAME PIVOT SRL">Madame Pivot</button>
@@ -187,19 +190,15 @@
 
 
     <div class="section-title">
-      <h2>DDT attesi dalle fatture 2026</h2><span class="n" id="t-attesi">0</span><span class="sp"></span>
+      <h2>DDT attesi dalle fatture <span id="anno-attesi"></span></h2><span class="n" id="t-attesi">0</span><span class="sp"></span>
       <button class="btn btn-ghost btn-sm" id="btn-aggiorna-attesi">Aggiorna dalle fatture</button>
     </div>
     <p class="muted small" style="margin:-4px 0 12px">Numeri DDT scritti nelle fatture d'acquisto. Si spuntano da soli quando il DDT viene protocollato; puoi spuntarli anche a mano.</p>
     <div class="riepilogo" id="riepilogo"></div>
     <div class="tools" style="margin-bottom:12px">
-      <div class="seg" id="filtro-stato">
-        <button data-s="aperti" class="on">Da ricevere</button>
-        <button data-s="fatti">Spuntati</button>
-        <button data-s="tutti">Tutti</button>
-      </div>
       <input class="input" id="cerca-attesi" type="search" placeholder="Cerca fornitore, numero DDT o fattura…">
       <label class="lbl"><input type="checkbox" id="mostra-nostri"> mostra anche i nostri DDT (conto lavoro)</label>
+      <button class="btn btn-ghost btn-sm" id="att-azzera" style="display:none">Togli filtri</button>
     </div>
     <div id="attesi"></div>
   </main>
@@ -226,8 +225,12 @@
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF3ZXhpcWljdWJhbm1vZGFlYnVhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NTk4MjUsImV4cCI6MjA5OTUzNTgyNX0.Z24OBYkn5SDO41IbfJYljO7yua6d_FNB4_rj5agnDPs';
   const BUCKET = 'ddt-ricevuti';
   const FUNZIONE = 'ddt-ricevuti';
+  // anno selezionato in alto: vale per tutte le liste
+  let annoSel = String(new Date().getFullYear());
+  try{ const a=localStorage.getItem('ddt-anno'); if(/^\d{4}$/.test(a||'')) annoSel=a; }catch{}
+  const annoAtteso = r => String(r.data_ddt||r.fattura_data||'').slice(0,4);
   // VERSIONE DEL PROGRAMMA: si vede in alto e resta registrata su ogni DDT letto
-  const VERSIONE = 'v6';
+  const VERSIONE = 'v7';
   const VERSIONE_DATA = '31/10/2026';
   const AZ = { 'MADAME PIVOT SRL':'MP', 'MP SPAZIO LAB SRL':'LAB' };
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -263,7 +266,7 @@
   async function carica(){
     const [{data:q,error:e1},{data:a,error:e2}] = await Promise.all([
       supabase.from('ddt_ricevuti').select('*').in('stato',['in_lettura','da_confermare']).order('creato_il'),
-      supabase.from('ddt_ricevuti').select('id,protocollo,protocollo_precedente,azienda,fornitore_denominazione,fornitore_piva,numero_ddt,data_ddt,protocollato_il,origine,file_path,file_nome,righe,causale_trasporto,note,email_mittente').eq('stato','protocollato').order('protocollato_il',{ascending:false}).limit(2000),
+      supabase.from('ddt_ricevuti').select('id,protocollo,protocollo_precedente,anno_protocollo,azienda,fornitore_denominazione,fornitore_piva,numero_ddt,data_ddt,protocollato_il,origine,file_path,file_nome,righe,causale_trasporto,note,email_mittente').eq('stato','protocollato').order('protocollato_il',{ascending:false}).limit(2000),
     ]);
     if(e1||e2){ $('coda').innerHTML=`<div class="empty danger">Errore: ${esc((e1||e2).message)}</div>`; return; }
     coda=q||[]; archivio=a||[];
@@ -274,6 +277,7 @@
     fornitoriFatture=forn||[];
     riempiListaFornitori();
     await caricaAttesi();
+    riempiAnni();
     leggiInAttesa();
   }
 
@@ -781,20 +785,59 @@
     attesi=data||[]; renderAttesi(); if(!modificato) renderCoda();
   }
   const fatto = r => !!(r.ddt_ricevuto_id || r.smarcato_manuale);
+  // filtri per colonna e ordinamento dei DDT attesi
+  const ft={ forn:'', num:'', mese:'', az:'', fatt:'', stato:'aperti' };
+  let ordA={ col:'forn', dir:1 };
+  const COL_A=[
+    {k:'forn', t:'Fornitore', v:r=>(r.fornitore_denominazione||'').toLowerCase()},
+    {k:'num', t:'DDT n.', v:r=>{ const c=chiave(r.numero_ddt); return c? c.padStart(12,'0') : ''; }},
+    {k:'data', t:'Data DDT', v:r=>r.data_ddt||''},
+    {k:'az', t:'Azienda', v:r=>r.azienda||''},
+    {k:'fatt', t:'Fattura', v:r=>(r.fattura_data||'')+(r.fattura_numero||''), cls:'hide-s'},
+    {k:'stato', t:'Stato', v:r=>r.ddt_ricevuto_id?2:r.smarcato_manuale?1:0},
+  ];
+  function scheletroAttesi(){
+    if($('att-tab')) return;
+    $('attesi').innerHTML=`<table class="arch" id="att-tab"><thead>
+      <tr><th></th>${COL_A.map(c=>`<th class="ord ${c.cls||''}" data-col="${c.k}">${c.t}<span class="fr"></span></th>`).join('')}</tr>
+      <tr class="filtri"><th></th>
+        <th><select class="input ft" data-f="forn" id="ft-forn"><option value="">Tutti i fornitori</option></select></th>
+        <th><input class="input ft mono" data-f="num" placeholder="n."></th>
+        <th><select class="input ft" data-f="mese"><option value="">Mese</option>${MESI.map((m,i)=>`<option value="${String(i+1).padStart(2,'0')}">${m}</option>`).join('')}</select></th>
+        <th><select class="input ft" data-f="az"><option value="">Tutte</option><option value="MADAME PIVOT SRL">Madame Pivot</option><option value="MP SPAZIO LAB SRL">MP Spazio Lab</option></select></th>
+        <th class="hide-s"><input class="input ft" data-f="fatt" placeholder="n. fattura"></th>
+        <th><select class="input ft" data-f="stato"><option value="aperti">Da ricevere</option><option value="fatti">Spuntati</option><option value="">Tutti</option></select></th>
+      </tr></thead><tbody id="att-corpo"></tbody></table>
+      <div class="empty" id="att-vuoto" style="display:none;margin-top:10px"></div>`;
+  }
   function renderAttesi(){
+    scheletroAttesi();
+    $('anno-attesi').textContent=annoSel;
     const q=$('cerca-attesi').value.trim().toLowerCase(), nostri=$('mostra-nostri').checked;
-    const base=attesi.filter(r=>(!filtroAz||r.azienda===filtroAz) && (nostri || !r.ddt_nostro));
+    const base=attesi.filter(r=>annoAtteso(r)===annoSel && (!filtroAz||r.azienda===filtroAz) && (nostri || !r.ddt_nostro));
+    opzioni($('ft-forn'), [...new Set(base.map(r=>r.fornitore_denominazione).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'it')), 'Tutti i fornitori');
+    for(const k of Object.keys(ft)){ const el=document.querySelector(`.ft[data-f="${k}"]`); if(el) ft[k]=el.value.trim(); }
     const nFatti=base.filter(fatto).length;
     $('t-attesi').textContent=base.length-nFatti;
-    $('riepilogo').innerHTML=`<div class="box"><b>${base.length}</b><span>DDT attesi</span></div>
+    $('riepilogo').innerHTML=`<div class="box"><b>${base.length}</b><span>DDT attesi ${annoSel}</span></div>
       <div class="box"><b class="stato-ok">${nFatti}</b><span>spuntati</span></div>
       <div class="box"><b>${base.length-nFatti}</b><span>da ricevere</span></div>`;
-    const lista=base.filter(r=> (filtroStato==='tutti' || (filtroStato==='fatti')===fatto(r))
-      && (!q || [r.fornitore_denominazione,r.numero_ddt,r.fattura_numero,r.ddt?.protocollo].some(x=>(x||'').toLowerCase().includes(q))));
-    if(!lista.length){ $('attesi').innerHTML=`<div class="empty">${attesi.length?'Nessun DDT con questi filtri.':'Elenco vuoto: premi "Aggiorna dalle fatture".'}</div>`; return; }
-    $('attesi').innerHTML=`<table class="arch"><thead><tr>
-      <th></th><th>Fornitore</th><th>DDT n.</th><th>Data DDT</th><th>Azienda</th><th class="hide-s">Fattura</th><th>Stato</th>
-    </tr></thead><tbody>${lista.map(r=>`<tr class="${fatto(r)?'fatto':''}" data-id="${r.id}">
+    const contiene=(x,y)=>(x||'').toLowerCase().includes(y.toLowerCase());
+    let lista=base.filter(r=> (!ft.stato || (ft.stato==='fatti')===fatto(r))
+      && (!ft.forn || r.fornitore_denominazione===ft.forn)
+      && (!ft.num || contiene(r.numero_ddt,ft.num) || (chiave(ft.num) && r.numero_chiave===chiave(ft.num)))
+      && (!ft.mese || (r.data_ddt||'').slice(5,7)===ft.mese)
+      && (!ft.az || r.azienda===ft.az)
+      && (!ft.fatt || contiene(r.fattura_numero,ft.fatt))
+      && (!q || [r.fornitore_denominazione,r.numero_ddt,r.fattura_numero,r.ddt?.protocollo].some(x=>contiene(x,q))));
+    const col=COL_A.find(c=>c.k===ordA.col)||COL_A[0];
+    lista.sort((a,b)=>{ const x=col.v(a), y=col.v(b); const c=(x<y?-1:x>y?1:0)*ordA.dir; return c || ((a.data_ddt||'')<(b.data_ddt||'')?-1:1); });
+    document.querySelectorAll('#att-tab th.ord').forEach(th=>{ const on=th.dataset.col===ordA.col; th.classList.toggle('on',on); th.querySelector('.fr').textContent= on ? (ordA.dir>0?'▲':'▼') : '↕'; });
+    const filtrato = !!q || ft.forn || ft.num || ft.mese || ft.az || ft.fatt || ft.stato!=='aperti';
+    $('att-azzera').style.display = filtrato ? 'inline-block' : 'none';
+    $('att-vuoto').style.display = lista.length ? 'none' : '';
+    $('att-vuoto').textContent = base.length ? 'Nessun DDT con questi filtri.' : `Nessun DDT atteso nel ${annoSel}.`;
+    $('att-corpo').innerHTML=lista.map(r=>`<tr class="${fatto(r)?'fatto':''}" data-id="${r.id}">
       <td><input type="checkbox" class="spunta" ${fatto(r)?'checked':''} ${r.ddt_ricevuto_id?'disabled title="Spuntato in automatico dal protocollo"':''}></td>
       <td class="forn">${esc(r.fornitore_denominazione||'')}${r.ddt_nostro?' <span class="chip">nostro DDT</span>':''}</td>
       <td class="mono">${esc(r.numero_ddt)}</td>
@@ -803,8 +846,31 @@
       <td class="hide-s small muted" title="${esc(r.testo||'')}">n. ${esc(r.fattura_numero||'')} del ${dataIt(r.fattura_data)}</td>
       <td>${r.ddt_ricevuto_id?`<a href="#" class="stato-ok a-prot" data-path="${esc(r.ddt?.file_path||'')}">✓ ${esc(r.ddt?.protocollo||'protocollato')}</a>`
             : r.smarcato_manuale?'<span class="stato-ok">✓ a mano</span>':'<span class="muted">da ricevere</span>'}</td>
-    </tr>`).join('')}</tbody></table>`;
+    </tr>`).join('');
   }
+  $('attesi').addEventListener('input', e=>{ if(e.target.classList.contains('ft')) renderAttesi(); });
+  $('attesi').addEventListener('click', e=>{
+    const th=e.target.closest('th.ord'); if(!th) return;
+    ordA = ordA.col===th.dataset.col ? {col:ordA.col, dir:-ordA.dir} : {col:th.dataset.col, dir:(th.dataset.col==='forn'||th.dataset.col==='az')?1:-1};
+    renderAttesi();
+  });
+  $('att-azzera').addEventListener('click', ()=>{ document.querySelectorAll('.ft').forEach(el=>el.value = el.dataset.f==='stato' ? 'aperti' : ''); $('cerca-attesi').value=''; renderAttesi(); });
+
+  /* ---------------- anno (in alto) ---------------- */
+  function riempiAnni(){
+    const anni=new Set([String(new Date().getFullYear()), annoSel]);
+    archivio.forEach(d=>d.anno_protocollo && anni.add(String(d.anno_protocollo)));
+    attesi.forEach(r=>{ const a=annoAtteso(r); if(a) anni.add(a); });
+    coda.forEach(d=>d.data_ddt && anni.add(d.data_ddt.slice(0,4)));
+    const sel=$('anno-globale');
+    sel.innerHTML=[...anni].sort().reverse().map(a=>`<option value="${a}">${a}</option>`).join('');
+    sel.value=annoSel;
+  }
+  $('anno-globale').addEventListener('change', e=>{
+    annoSel=e.target.value; try{ localStorage.setItem('ddt-anno',annoSel); }catch{}
+    renderCoda(); renderAttesi(); renderArchivio();
+  });
+
   $('attesi').addEventListener('change', async e=>{
     if(!e.target.classList.contains('spunta')) return;
     const id=e.target.closest('tr').dataset.id, v=e.target.checked;
@@ -816,10 +882,6 @@
   $('btn-aggiorna-attesi').addEventListener('click', aggiornaAttesi);
   $('cerca-attesi').addEventListener('input', renderAttesi);
   $('mostra-nostri').addEventListener('change', renderAttesi);
-  $('filtro-stato').addEventListener('click', e=>{
-    const b=e.target.closest('button'); if(!b) return; filtroStato=b.dataset.s;
-    $('filtro-stato').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b)); renderAttesi();
-  });
   $('tabs').addEventListener('click', e=>{
     const b=e.target.closest('button'); if(!b) return;
     $('tabs').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
@@ -903,8 +965,8 @@
     ['note','Note','w4'],
   ];
   let renderCoda = function(){
-    const lista=coda.filter(d=>!filtroAz || d.azienda===filtroAz || !d.azienda);
-    $('n-coda').textContent=lista.length;
+    const lista=coda.filter(d=>(!filtroAz || d.azienda===filtroAz || !d.azienda) && (!d.data_ddt || d.data_ddt.startsWith(annoSel)));
+    $('n-coda').textContent=lista.length; $('t-coda').textContent=lista.length;
     $('btn-prot-tutti').style.display = lista.some(d=>d.stato==='da_confermare' && completo(d)) ? '' : 'none';
     if(!lista.length){ $('coda').innerHTML='<div class="empty">Niente da confermare. Trascina dei DDT qui sopra, oppure inviali a <b>madamepivotdocuments@gmail.com</b> con oggetto <b>DDT</b>.</div>'; return; }
     $('coda').innerHTML=lista.map(d=>{
@@ -1016,7 +1078,7 @@
   /* ---------------- archivio ---------------- */
   let inModifica=null;
   // filtri per colonna e ordinamento dell'archivio
-  const fa={ prot:'', az:'', forn:'', num:'', anno:'', mese:'' };
+  const fa={ prot:'', az:'', forn:'', num:'', mese:'' };
   let ordine={ col:'data_ddt', dir:-1 };
   const MESI=['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
   const COLONNE=[
@@ -1036,8 +1098,7 @@
         <th><select class="input af" data-f="az"><option value="">Tutte</option><option value="MADAME PIVOT SRL">Madame Pivot</option><option value="MP SPAZIO LAB SRL">MP Spazio Lab</option></select></th>
         <th><select class="input af" data-f="forn" id="af-forn"><option value="">Tutti i fornitori</option></select></th>
         <th><input class="input af mono" data-f="num" placeholder="n."></th>
-        <th><div class="anno-mese"><select class="input af" data-f="anno" id="af-anno"><option value="">Anno</option></select>
-             <select class="input af" data-f="mese"><option value="">Mese</option>${MESI.map((m,i)=>`<option value="${String(i+1).padStart(2,'0')}">${m}</option>`).join('')}</select></div></th>
+        <th><div class="anno-mese"><select class="input af" data-f="mese"><option value="">Mese</option>${MESI.map((m,i)=>`<option value="${String(i+1).padStart(2,'0')}">${m}</option>`).join('')}</select></div></th>
         <th class="hide-s"></th><th></th>
       </tr></thead><tbody id="arch-corpo"></tbody></table>
       <div class="empty" id="arch-vuoto" style="display:none;margin-top:10px"></div>`;
@@ -1050,7 +1111,6 @@
   function renderArchivio(){
     scheletroArchivio();
     opzioni($('af-forn'), [...new Set(archivio.map(d=>d.fornitore_denominazione).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'it')), 'Tutti i fornitori');
-    opzioni($('af-anno'), [...new Set(archivio.map(d=>(d.data_ddt||'').slice(0,4)).filter(Boolean))].sort().reverse(), 'Anno');
     for(const k of Object.keys(fa)){ const el=document.querySelector(`.af[data-f="${k}"]`); if(el) fa[k]=el.value.trim(); }
     const q=$('cerca').value.trim().toLowerCase();
     const contiene=(x,y)=>(x||'').toLowerCase().includes(y.toLowerCase());
@@ -1060,17 +1120,18 @@
       && (!fa.az || d.azienda===fa.az)
       && (!fa.forn || d.fornitore_denominazione===fa.forn)
       && (!fa.num || contiene(d.numero_ddt,fa.num) || (chiave(fa.num) && chiave(d.numero_ddt)===chiave(fa.num)))
-      && (!fa.anno || (d.data_ddt||'').startsWith(fa.anno))
+      && String(d.anno_protocollo)===annoSel
       && (!fa.mese || (d.data_ddt||'').slice(5,7)===fa.mese));
     const col=COLONNE.find(c=>c.k===ordine.col)||COLONNE[5];
     lista.sort((a,b)=>{ const x=col.v(a), y=col.v(b); return (x<y?-1:x>y?1:0)*ordine.dir; });
     document.querySelectorAll('#arch-tab th.ord').forEach(th=>{ const on=th.dataset.col===ordine.col; th.classList.toggle('on',on); th.querySelector('.fr').textContent= on ? (ordine.dir>0?'▲':'▼') : '↕'; });
     const filtrato = !!q || Object.values(fa).some(Boolean);
     $('arch-azzera').style.display = filtrato ? 'inline-block' : 'none';
-    $('n-arch').textContent = filtrato ? `${lista.length} di ${archivio.length}` : archivio.length;
-    $('t-arch').textContent = archivio.length;
+    const dellAnno=archivio.filter(d=>String(d.anno_protocollo)===annoSel && (!filtroAz||d.azienda===filtroAz)).length;
+    $('n-arch').textContent = filtrato ? `${lista.length} di ${dellAnno}` : dellAnno;
+    $('t-arch').textContent = dellAnno;
     $('arch-vuoto').style.display = lista.length ? 'none' : '';
-    $('arch-vuoto').textContent = archivio.length ? 'Nessun DDT con questi filtri.' : 'Nessun DDT protocollato.';
+    $('arch-vuoto').textContent = dellAnno ? 'Nessun DDT con questi filtri.' : `Nessun DDT protocollato nel ${annoSel}.`;
     $('arch-corpo').innerHTML=lista.map(d=>`<tr data-id="${d.id}">
       <td class="mono">${esc(d.protocollo)}${d.protocollo_precedente && d.protocollo_precedente!==d.protocollo ? `<div class="muted small" title="Numero assegnato prima della rinumerazione">prima ${esc(d.protocollo_precedente)}</div>` : ''}</td>
       <td>${chipAz(d.azienda)}</td>
