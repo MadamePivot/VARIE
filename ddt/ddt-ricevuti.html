@@ -266,10 +266,10 @@
   }
   // posizione del numero DDT nel testo, tollerando le piccole differenze dell'OCR
   // ("1.331/V" trovato anche come "1.331V" o "1331/V"; "00669" anche come "669")
-  function posNumero(testo, numero){
+  function posNumero(testo, numero, largo=false){
     const c=String(numero||'').replace(/[^A-Za-z0-9]/g,'').replace(/^0+(?=\d)/,'');
     if(!c) return -1;
-    const re=new RegExp('(?<![A-Za-z0-9])0*'+[...c].map(reEsc).join('[\\s.\\/\\-]?')+'(?![A-Za-z0-9])','i');
+    const re=new RegExp('(?<![A-Za-z0-9])0*'+[...c].map(reEsc).join('[\\s.\\/\\-]?')+(largo?'':'(?![A-Za-z0-9])'),'i');
     const m=re.exec(testo); return m? m.index : -1;
   }
   const chiave = n => { const m=String(n||'').toLowerCase().replace(/(\d)\.(?=\d)/g,'$1').match(/(\d+)([a-z]?)/); return m? String(parseInt(m[1],10))+m[2] : ''; };
@@ -317,9 +317,17 @@
     return null;
   }
 
+  // ---- quanto e' "leggibile" un testo OCR: serve a capire se la pagina era capovolta o girata
+  const PAROLE_DDT=['documento','trasporto','data','partita','iva','descrizione','quantita','destinatario','destinazione','vettore','causale','colli','pagina','spett','via','codice','cliente','fornitore','merce','firma','porto','articolo','ordine','totale','peso','aspetto','beni','consegna','pagamento','fiscale'];
+  function qualitaTesto(t){
+    const tp=' '+soloParole(t)+' ';
+    let n=0; for(const w of PAROLE_DDT) if(tp.includes(' '+w)) n++;
+    return n + 2*Math.min(dateIn(t).length,3) + (piveIn(t).length?2:0);
+  }
+
   // ---- regole generiche
   function numeroGenerico(testo){
-    const re=/(?:d\.?\s?d\.?\s?t\.?|documento\s+di\s+trasporto|doc\.?\s*di\s*trasp\w*|bolla(?:\s+di\s+consegna)?|n(?:umero|r)?\.?\s*doc(?:umento)?\.?)\s*(?:n(?:r|um(?:ero)?)?\.?\s*|n[°º]\s*)?[:.]?\s*([A-Z]{0,4}[\s\/\-]?\d[\w\/\-]{0,15})/i;
+    const re=/(?:d\.?\s?d\.?\s?t\.?|documento\s+di\s+trasporto|doc\.?\s*di\s*trasp\w*|bolla(?:\s+di\s+consegna)?|n(?:umero|r)?\.?\s*doc(?:umento)?\.?)[\s|:.'‘’"]*(?:n(?:r|um(?:ero)?)?\.?\s*|n[°º]\s*)?[\s|:.'‘’"]*([A-Z]{0,4}[\s\/\-]?\d[\w\/\-]{0,15})/i;
     const m=re.exec(testo); if(!m) return null;
     return { numero:m[1].replace(/[.\-\/]+$/,'').trim(), index:m.index+m[0].length };
   }
@@ -346,6 +354,11 @@
       if(/madame\s*pivot/.test(tp)) nostre.push('MADAME PIVOT SRL');
       if(/spazio\s*lab/.test(tp)) nostre.push('MP SPAZIO LAB SRL');
     }
+    // ultimo tentativo: l'indirizzo (Madame Pivot: via del Crocifisso, Bagno a Ripoli; MP Spazio Lab: via Bellini, Sieci)
+    if(!nostre.length){
+      if(/crocifiss|bagno\W+a\W+\S{0,3}poli|ripoli/.test(tp)) nostre.push('MADAME PIVOT SRL');
+      else if(/bellini|sieci/.test(tp)) nostre.push('MP SPAZIO LAB SRL');
+    }
 
     // fornitore: prima P.IVA non nostra che conosciamo, poi per nome, poi prima P.IVA sconosciuta
     const noti=new Map(ctx.fornitori.filter(f=>f.piva).map(f=>[String(f.piva).replace(/\D/g,'').slice(-11), f]));
@@ -353,11 +366,16 @@
     let forn=altre.map(p=>noti.get(p.piva)).find(Boolean) || null;
     if(!forn){
       let best=null;
+      const VUOTE=['srl','spa','sas','snc','srls','societa','soc','della','delle','dello','italia','group','calzature','pelli','pellami','accessori','commerciale','industria'];
       for(const f of ctx.fornitori){
-        const parole=soloParole(f.nome).split(' ').filter(w=>w.length>=3 && !['srl','spa','sas','snc','srls','societa','di','del','della'].includes(w)).slice(0,2);
-        if(!parole.length || parole.join('').length<5) continue;
-        const i=tp.search(new RegExp('\\b'+parole.map(reEsc).join('\\W+')+'\\b'));
-        if(i>=0 && (!best || i<best.i)) best={i,f};
+        const parole=soloParole(f.nome).split(' ').filter(w=>w.length>=3 && !['di','del','dei','e','c','s','a'].includes(w));
+        for(let k=0;k<parole.length-1;k++){
+          const [a,b]=[parole[k],parole[k+1]];
+          if(VUOTE.includes(a) && VUOTE.includes(b)) continue;
+          if((a+b).length<8) continue;
+          const i=tp.search(new RegExp('\\b'+reEsc(a)+'\\W+(?:[a-z]{1,3}\\W+)?'+reEsc(b)+'\\b'));
+          if(i>=0 && (!best || i<best.i)) best={i,f};
+        }
       }
       forn=best?.f||null;
     }
@@ -371,9 +389,12 @@
 
     // 1) DDT attesi di questo fornitore presenti nel testo
     const date=new Set(dateIn(t).map(d=>d.iso));
-    const candidati=ctx.attesi.filter(a=>a.aperto && stesso(a) && posNumero(t,a.numero_ddt)>=0)
+    const suoi=ctx.attesi.filter(a=>a.aperto && stesso(a));
+    let candidati=suoi.filter(a=>posNumero(t,a.numero_ddt)>=0)
       .map(a=>({a, conData: a.data_ddt && date.has(a.data_ddt)}))
       .sort((x,y)=>(y.conData?1:0)-(x.conData?1:0));
+    // l'OCR a volte attacca un carattere al numero ("8527/1 |" letto "8527/11"): accetto se coincide anche la data
+    if(!candidati.length) candidati=suoi.filter(a=>a.data_ddt && date.has(a.data_ddt) && posNumero(t,a.numero_ddt,true)>=0).map(a=>({a,conData:true}));
     if(candidati.length && (candidati[0].conData || !candidati[0].a.data_ddt)){
       const a=candidati[0].a;
       r.numero_ddt=a.numero_ddt; r.data_ddt=a.data_ddt; r.fonte='attesi';
@@ -398,7 +419,7 @@
       else if(modello?.azienda_predefinita) r.azienda=modello.azienda_predefinita;
     }
     if(!r.azienda) r.avvisi.push(nostre.length>1? 'Nel DDT ci sono entrambe le aziende: scegli quella giusta.' : 'Azienda non riconosciuta: sceglila.');
-    if(!r.numero_ddt) r.avvisi.push('Numero DDT non trovato: scrivilo, dalla prossima volta per questo fornitore lo trovo da solo.');
+    if(!r.numero_ddt) r.avvisi.push('Numero DDT non trovato: scrivilo. Se è stampato, dalla prossima volta per questo fornitore lo trovo da solo; se è scritto a mano va sempre inserito a mano.');
     else if(r.fonte==='generico') r.avvisi.push('Numero e data trovati con regole generiche: controllali.');
     return r;
   }
@@ -434,11 +455,31 @@
     return window.pdfjsLib;
   }
   let _ocr=null;
-  async function ocr(immagine){
+  async function ocrSemplice(immagine){
     if(!window.Tesseract) await caricaScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js');
     if(!_ocr) _ocr=await window.Tesseract.createWorker('ita');
     const { data } = await _ocr.recognize(immagine);
     return data.text||'';
+  }
+  function ruota(cv, gradi){
+    const out=document.createElement('canvas'); const dritto=gradi%180===0;
+    out.width=dritto?cv.width:cv.height; out.height=dritto?cv.height:cv.width;
+    const g=out.getContext('2d'); g.translate(out.width/2,out.height/2); g.rotate(gradi*Math.PI/180); g.drawImage(cv,-cv.width/2,-cv.height/2);
+    return out;
+  }
+  // OCR che prova anche la pagina capovolta o girata di lato, se il testo letto non ha senso
+  async function ocr(immagine){
+    let cv=immagine;
+    if(!(immagine instanceof HTMLCanvasElement)){
+      const bmp=await createImageBitmap(immagine); cv=document.createElement('canvas'); cv.width=bmp.width; cv.height=bmp.height; cv.getContext('2d').drawImage(bmp,0,0);
+    }
+    let meglio={t:await ocrSemplice(cv)}; meglio.q=qualitaTesto(meglio.t);
+    for(const gradi of [180,90,270]){
+      if(meglio.q>=8) break;
+      const t=await ocrSemplice(ruota(cv,gradi)), q=qualitaTesto(t);
+      if(q>meglio.q) meglio={t,q};
+    }
+    return meglio.t;
   }
   // ricostruisce le righe del PDF dalla posizione delle scritte
   function righeDaItems(items){
