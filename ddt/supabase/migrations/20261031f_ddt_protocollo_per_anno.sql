@@ -38,7 +38,7 @@ begin
   )
   update ddt_ricevuti d set anno_protocollo = o.a, numero_protocollo = -o.n from ord o where d.id=o.id;
   update ddt_ricevuti set numero_protocollo = -numero_protocollo where stato='protocollato' and numero_protocollo < 0;
-  delete from contatori_protocollo_ddt;
+  delete from contatori_protocollo_ddt where true;  -- la protezione di Supabase vieta DELETE senza WHERE
   insert into contatori_protocollo_ddt (azienda, anno, ultimo_numero)
     select x.azienda, x.anno_protocollo, max(x.numero_protocollo) from ddt_ricevuti x where x.stato='protocollato' group by 1,2;
   return query select c.azienda, c.anno, c.ultimo_numero from contatori_protocollo_ddt c order by 1,2;
