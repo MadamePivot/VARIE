@@ -187,6 +187,7 @@
       <h2>Da confermare</h2><span class="n" id="n-coda">0</span><span class="sp"></span>
       <button class="btn btn-primary btn-sm" id="btn-prot-tutti" style="display:none">Protocolla tutti quelli completi</button>
     </div>
+    <div id="altri-anni"></div>
     <div id="coda"></div>
 
 
@@ -231,7 +232,7 @@
   try{ const a=localStorage.getItem('ddt-anno'); if(/^\d{4}$/.test(a||'')) annoSel=a; }catch{}
   const annoAtteso = r => String(r.data_ddt||r.fattura_data||'').slice(0,4);
   // VERSIONE DEL PROGRAMMA: si vede in alto e resta registrata su ogni DDT letto
-  const VERSIONE = 'v9';
+  const VERSIONE = 'v10';
   const VERSIONE_DATA = '31/10/2026';
   const AZ = { 'MADAME PIVOT SRL':'MP', 'MP SPAZIO LAB SRL':'LAB' };
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -867,6 +868,10 @@
     sel.innerHTML=[...anni].sort().reverse().map(a=>`<option value="${a}">${a}</option>`).join('');
     sel.value=annoSel;
   }
+  $('altri-anni').addEventListener('click', e=>{
+    const a=e.target.closest('.vai-anno'); if(!a) return; e.preventDefault();
+    const sel=$('anno-globale'); sel.value=a.dataset.anno; sel.dispatchEvent(new Event('change'));
+  });
   $('anno-globale').addEventListener('change', e=>{
     annoSel=e.target.value; try{ localStorage.setItem('ddt-anno',annoSel); }catch{}
     renderCoda(); renderAttesi(); renderArchivio();
@@ -919,8 +924,8 @@
       passo(`Carico ${fatti+1} di ${tot}: ${f.name}`);
       try{
         const impronta=await sha256(f);
-        const { data:gia } = await supabase.from('ddt_ricevuti').select('id,protocollo,stato').eq('impronta',impronta).neq('stato','scartato').maybeSingle();
-        if(gia){ riga(`${f.name}: già presente ${gia.protocollo?'('+gia.protocollo+')':'(da confermare)'}`,'muted'); fatti++; continue; }
+        const { data:gia } = await supabase.from('ddt_ricevuti').select('id,protocollo,stato,data_ddt').eq('impronta',impronta).neq('stato','scartato').maybeSingle();
+        if(gia){ const an=(gia.data_ddt||'').slice(0,4); riga(`${f.name}: già presente ${gia.protocollo?'('+gia.protocollo+')':'(da confermare'+(an?', anno '+an:'')+')'}${an && an!==annoSel?' — scegli '+an+' in alto per vederlo':''}`,'muted'); fatti++; continue; }
         const mese=new Date().toISOString().slice(0,7);
         const path=`caricati/${mese}/${Date.now()}_${f.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
         const { error:up } = await supabase.storage.from(BUCKET).upload(path,f,{contentType:f.type||'application/pdf'});
@@ -968,6 +973,9 @@
   let renderCoda = function(){
     const lista=coda.filter(d=>(!filtroAz || d.azienda===filtroAz || !d.azienda) && (!d.data_ddt || d.data_ddt.startsWith(annoSel)));
     $('n-coda').textContent=lista.length; $('t-coda').textContent=lista.length;
+    // DDT da confermare di altri anni: non si mescolano, ma non devono sparire
+    const altri={}; coda.forEach(d=>{ const a=(d.data_ddt||'').slice(0,4); if(a && a!==annoSel && (!filtroAz||d.azienda===filtroAz||!d.azienda)) altri[a]=(altri[a]||0)+1; });
+    $('altri-anni').innerHTML=Object.keys(altri).sort().reverse().map(a=>`<div class="avviso">Ci sono <b>${altri[a]}</b> DDT da confermare del <b>${a}</b>. <a href="#" class="vai-anno" data-anno="${a}">Mostra il ${a}</a></div>`).join('');
     $('btn-prot-tutti').style.display = lista.some(d=>d.stato==='da_confermare' && completo(d)) ? '' : 'none';
     if(!lista.length){ $('coda').innerHTML='<div class="empty">Niente da confermare. Trascina dei DDT qui sopra, oppure inviali a <b>madamepivotdocuments@gmail.com</b> con oggetto <b>DDT</b>.</div>'; return; }
     $('coda').innerHTML=lista.map(d=>{
