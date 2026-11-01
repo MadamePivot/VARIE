@@ -207,7 +207,7 @@
   <main id="tab-archivio" style="display:none">
     <div class="section-title">
       <h2>Archivio protocollati</h2><span class="n" id="n-arch">0</span><span class="sp"></span>
-      <div class="tools"><button class="btn btn-ghost btn-sm" id="arch-azzera">Togli filtri</button><input class="input" id="cerca" type="search" placeholder="Cerca fornitore, numero, protocollo…"></div>
+      <div class="tools"><button class="btn btn-ghost btn-sm" id="arch-riordina" title="Rinumera i protocolli in ordine di data del DDT, per azienda e anno">Riordina progressivi</button><button class="btn btn-ghost btn-sm" id="arch-azzera">Togli filtri</button><input class="input" id="cerca" type="search" placeholder="Cerca fornitore, numero, protocollo…"></div>
     </div>
     <div id="archivio"></div>
   </main>
@@ -231,7 +231,7 @@
   try{ const a=localStorage.getItem('ddt-anno'); if(/^\d{4}$/.test(a||'')) annoSel=a; }catch{}
   const annoAtteso = r => String(r.data_ddt||r.fattura_data||'').slice(0,4);
   // VERSIONE DEL PROGRAMMA: si vede in alto e resta registrata su ogni DDT letto
-  const VERSIONE = 'v8';
+  const VERSIONE = 'v9';
   const VERSIONE_DATA = '31/10/2026';
   const AZ = { 'MADAME PIVOT SRL':'MP', 'MP SPAZIO LAB SRL':'LAB' };
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -1162,6 +1162,15 @@
     const th=e.target.closest('th.ord'); if(!th) return;
     ordine = ordine.col===th.dataset.col ? {col:ordine.col, dir:-ordine.dir} : {col:th.dataset.col, dir: (th.dataset.col==='fornitore_denominazione'||th.dataset.col==='azienda') ? 1 : -1};
     renderArchivio();
+  });
+  $('arch-riordina').addEventListener('click', async ()=>{
+    if(!confirm('Riordino i numeri di protocollo di TUTTI i DDT protocollati in ordine di data del DDT, separati per azienda e anno.\n\nI numeri cambiano: il primo numero assegnato a ogni DDT resta visibile come "prima ...".\n\nProcedo?')) return;
+    const b=$('arch-riordina'); b.disabled=true; b.textContent='Riordino…';
+    const { data, error } = await supabase.rpc('riordina_progressivi_ddt');
+    b.disabled=false; b.textContent='Riordina progressivi';
+    if(error) return alert('Riordino non riuscito: '+error.message);
+    toast('✓ Progressivi riordinati per data: '+(data||[]).map(r=>`${r.azienda==='MP SPAZIO LAB SRL'?'LAB':'MP'} ${r.anno}: ${r.ddt}`).join(' · '));
+    carica();
   });
   $('arch-azzera').addEventListener('click', ()=>{ document.querySelectorAll('.af').forEach(el=>el.value=''); $('cerca').value=''; renderArchivio(); });
   $('archivio').addEventListener('click', async e=>{

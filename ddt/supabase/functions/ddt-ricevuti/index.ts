@@ -17,7 +17,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 // @ts-ignore: modulo JS
-import { estraiRiferimentiDdt, riferimentoRigaSemplice } from "./ddt_parser.js";
+import { estraiRiferimentiDdt, riferimentoRigaSemplice, chiaveNumero } from "./ddt_parser.js";
 
 const BUCKET = "ddt-ricevuti";
 const MAX_BYTES = 20 * 1024 * 1024;
@@ -88,6 +88,26 @@ async function aggiornaAttesi() {
         numero_ddt: x.numero, numero_chiave: x.numero_chiave, data_ddt: x.data, ddt_nostro: x.nostro, testo: x.testo,
       });
     }
+  }
+  // 3) DDT del blocco <DatiDDT> dell'XML (salvati da importa-xml-fatture in fatture_dati_ddt)
+  for (let da = 0; ; da += 1000) {
+    const { data, error } = await sb.from("fatture_dati_ddt")
+      .select("numero_ddt, data_ddt, fattura:fatture!inner(id, numero, data, azienda, tipo_documento, fornitore_denominazione, fornitore_piva)")
+      .gte("fattura.data", DAL).order("id").range(da, da + 999);
+    if (error) throw new Error("lettura DatiDDT: " + error.message);
+    for (const d of data || []) {
+      const f = d.fattura;
+      if (!f || TIPI_ESCLUSI.includes(f.tipo_documento)) continue;
+      const numero_chiave = chiaveNumero(d.numero_ddt);
+      const chiave = `${f.id}|${numero_chiave}|${d.data_ddt || ""}`;
+      if (!numero_chiave || nuovi.has(chiave)) continue;
+      nuovi.set(chiave, {
+        chiave, azienda: f.azienda, fattura_id: f.id, fattura_numero: f.numero, fattura_data: f.data,
+        fornitore_denominazione: f.fornitore_denominazione, fornitore_piva: f.fornitore_piva,
+        numero_ddt: d.numero_ddt, numero_chiave, data_ddt: d.data_ddt, ddt_nostro: false, testo: "DatiDDT (XML fattura)",
+      });
+    }
+    if (!data || data.length < 1000) break;
   }
   const lista = [...nuovi.values()];
   let inseriti = 0;
