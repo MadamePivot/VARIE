@@ -3,7 +3,7 @@
 // La lettura dei DDT NON e' fatta qui: la fa gratis il programma nel browser (testo del PDF o OCR),
 // imparando per ogni fornitore dove stanno numero e data. Qui restano:
 //  1. dalla pagina (utente collegato, header Authorization: Bearer <jwt>)
-//       { azione: "aggiorna_attesi" }      rilegge le fatture d'acquisto dal 2026 e aggiorna l'elenco dei DDT attesi
+//       { azione: "aggiorna_attesi" }      rilegge le fatture d'acquisto dal 2021 e aggiorna l'elenco dei DDT attesi
 //  2. dallo script "Postino DDT" (Google Apps Script in madamepivotdocuments@gmail.com, campo token)
 //       { azione: "ricevi", token, gmail_message_id, nome_file, file_base64, mittente, oggetto, ricevuta_il }
 //                                          archivia l'allegato: il programma lo legge alla prossima apertura
@@ -52,7 +52,7 @@ function tipoFile(bytes: Uint8Array, nome: string): string | null {
 }
 
 // ---------------------------------------------------------------- DDT attesi (dalle fatture d'acquisto)
-const DAL = "2026-01-01";
+const DAL = "2021-01-01";
 const TIPI_ESCLUSI = ["TD04", "TD05", "TD08", "TD09", "TD16", "TD17", "TD18", "TD19", "TD28"];
 const FILTRO_RIGHE = "descrizione.ilike.%ddt%,descrizione.ilike.%d.d.t%,descrizione.ilike.%bolla%,descrizione.ilike.%trasp%";
 
