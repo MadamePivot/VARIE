@@ -8,7 +8,7 @@ Programma separato (non fa parte del gestionale principale) per:
    oppure con il modello **imparato** per quel fornitore (dal primo DDT confermato a mano in poi);
 3. **protocollarli** per azienda e anno: `MP-2026-0001`, `LAB-2026-0001`…;
 4. **archiviarli** (cartella privata `ddt-ricevuti` su Supabase);
-5. **spuntare** i DDT citati nelle fatture d'acquisto 2026 (scheda *DDT attesi dalle fatture*).
+5. **spuntare** i DDT citati nelle fatture d'acquisto dal 2021 (scheda *DDT attesi dalle fatture*).
 
 ## File
 
@@ -41,14 +41,17 @@ Programma separato (non fa parte del gestionale principale) per:
 ## Come funziona il protocollo
 
 - Il numero si assegna solo quando si preme **Protocolla e archivia** (o *Protocolla tutti quelli completi*): niente buchi nella numerazione per i documenti scartati.
-- Numerazione separata per azienda, riparte ogni anno.
+- Numerazione separata per azienda, riparte ogni anno; l'anno è quello della **data del DDT**.
+- *Da confermare* mostra i DDT di tutti gli anni (con l'anno sulla scheda): una volta protocollati finiscono nell'archivio del loro anno.
+- Se esiste già un DDT protocollato dello stesso fornitore con lo stesso numero, la scheda avvisa *Possibile doppione*.
+- *Riordina progressivi* rinumera per data i protocolli di azienda e anno.
 - Un DDT protocollato non può cambiare azienda.
 - Lo stesso file caricato due volte viene riconosciuto e non duplicato.
 
 ## DDT attesi dalle fatture
 
-- Vengono letti dalle **righe** delle fatture d'acquisto dal 1/1/2026 (es. "Rif. DDT 0000034 del 16/01/2026").
+- Vengono letti dalle **righe** e dal blocco XML `DatiDDT` delle fatture d'acquisto dal 1/1/2021 (es. "Rif. DDT 0000034 del 16/01/2026").
 - Si spuntano da soli quando si protocolla un DDT con stessa azienda, stesso fornitore (P.IVA), stesso numero e stessa data; si possono spuntare a mano.
 - "Rif. VS DDT" = DDT nostri (conto lavoro): nascosti di default.
-- Limite: le fatture che indicano il DDT solo nel blocco XML `DatiDDT` (e non nelle righe) oggi non vengono viste, perché l'import delle fatture non salva quel blocco.
+- I DDT arrivati prima della fattura restano *in attesa di fattura* e si abbinano da soli quando la fattura viene importata.
 - L'elenco si aggiorna col pulsante *Aggiorna dalle fatture* e ogni mattina dallo script Gmail.

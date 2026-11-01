@@ -127,6 +127,7 @@
   .anno-top{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--ink-2)}
   .anno-top select{width:auto;padding:6px 28px 6px 10px;font-weight:600;font-size:14px;color:var(--accent-2);background-color:var(--accent-bg);border-color:var(--accent-bg)}
   .chip.attesa{background:var(--warn-bg);color:var(--warn)}
+  .avviso.doppione{background:var(--danger-bg);color:var(--danger)}
   #toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;opacity:0;pointer-events:none;transition:all .25s;z-index:50}
   #toast.show{opacity:1;transform:translateX(-50%)}
   @media (max-width:760px){ .qgrid{grid-template-columns:1fr 1fr} #drop{flex-wrap:wrap} #drop .acts{margin-left:0} table.arch .hide-s{display:none} }
@@ -232,7 +233,7 @@
   try{ const a=localStorage.getItem('ddt-anno'); if(/^\d{4}$/.test(a||'')) annoSel=a; }catch{}
   const annoAtteso = r => String(r.data_ddt||r.fattura_data||'').slice(0,4);
   // VERSIONE DEL PROGRAMMA: si vede in alto e resta registrata su ogni DDT letto
-  const VERSIONE = 'v10';
+  const VERSIONE = 'v11';
   const VERSIONE_DATA = '31/10/2026';
   const AZ = { 'MADAME PIVOT SRL':'MP', 'MP SPAZIO LAB SRL':'LAB' };
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -555,6 +556,10 @@
       const a=candidati[0].a;
       r.numero_ddt=a.numero_ddt; r.data_ddt=a.data_ddt; r.fonte='attesi';
       if(!r.azienda && nostre.length!==1) r.azienda=a.azienda;
+      // stesso numero in anni diversi (es. n. 50 del 2025 e del 2026): avviso se la data non e' stampata chiaramente
+      const omonimi=[...new Set(ctx.attesi.filter(x=>!x.ddt_nostro && stesso(x) && x.numero_chiave===a.numero_chiave && x.data_ddt!==a.data_ddt).map(x=>x.data_ddt).filter(Boolean))];
+      if(omonimi.length && !candidati[0].conData)
+        r.avvisi.push(`Attenzione: ci sono altri DDT n. ${a.numero_ddt} di questo fornitore (${omonimi.map(d=>d.split('-').reverse().join('/')).join(', ')}): controlla la data.`);
     }
     // 2) modello imparato
     if(!r.numero_ddt && modello){
@@ -925,7 +930,7 @@
       try{
         const impronta=await sha256(f);
         const { data:gia } = await supabase.from('ddt_ricevuti').select('id,protocollo,stato,data_ddt').eq('impronta',impronta).neq('stato','scartato').maybeSingle();
-        if(gia){ const an=(gia.data_ddt||'').slice(0,4); riga(`${f.name}: già presente ${gia.protocollo?'('+gia.protocollo+')':'(da confermare'+(an?', anno '+an:'')+')'}${an && an!==annoSel?' — scegli '+an+' in alto per vederlo':''}`,'muted'); fatti++; continue; }
+        if(gia){ const an=(gia.data_ddt||'').slice(0,4); riga(`${f.name}: già presente ${gia.protocollo?'('+gia.protocollo+')':'(da confermare'+(an?', anno '+an:'')+')'}`,'muted'); fatti++; continue; }
         const mese=new Date().toISOString().slice(0,7);
         const path=`caricati/${mese}/${Date.now()}_${f.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
         const { error:up } = await supabase.storage.from(BUCKET).upload(path,f,{contentType:f.type||'application/pdf'});
@@ -971,11 +976,10 @@
     ['note','Note','w4'],
   ];
   let renderCoda = function(){
-    const lista=coda.filter(d=>(!filtroAz || d.azienda===filtroAz || !d.azienda) && (!d.data_ddt || d.data_ddt.startsWith(annoSel)));
+    // da confermare: sempre tutti gli anni (una volta protocollati vanno nell'archivio del loro anno)
+    const lista=coda.filter(d=>(!filtroAz || d.azienda===filtroAz || !d.azienda));
     $('n-coda').textContent=lista.length; $('t-coda').textContent=lista.length;
-    // DDT da confermare di altri anni: non si mescolano, ma non devono sparire
-    const altri={}; coda.forEach(d=>{ const a=(d.data_ddt||'').slice(0,4); if(a && a!==annoSel && (!filtroAz||d.azienda===filtroAz||!d.azienda)) altri[a]=(altri[a]||0)+1; });
-    $('altri-anni').innerHTML=Object.keys(altri).sort().reverse().map(a=>`<div class="avviso">Ci sono <b>${altri[a]}</b> DDT da confermare del <b>${a}</b>. <a href="#" class="vai-anno" data-anno="${a}">Mostra il ${a}</a></div>`).join('');
+    $('altri-anni').innerHTML='';
     $('btn-prot-tutti').style.display = lista.some(d=>d.stato==='da_confermare' && completo(d)) ? '' : 'none';
     if(!lista.length){ $('coda').innerHTML='<div class="empty">Niente da confermare. Trascina dei DDT qui sopra, oppure inviali a <b>madamepivotdocuments@gmail.com</b> con oggetto <b>DDT</b>.</div>'; return; }
     $('coda').innerHTML=lista.map(d=>{
@@ -986,10 +990,12 @@
           ${d.origine==='email'?`<span class="chip email" title="${esc(d.email_mittente||'')}">via email</span>`:''}
           ${busy?'<span class="chip">da leggere…</span>':''}
           <span class="muted small">${quando(d.creato_il)}</span>
+          ${d.data_ddt?`<span class="chip" title="Anno del DDT: verrà protocollato nel ${d.data_ddt.slice(0,4)}">${d.data_ddt.slice(0,4)}</span>`:''}
           <span style="flex:1"></span>
           <button class="btn btn-ghost btn-sm a-apri">Vedi PDF</button>
         </div>
         ${d.avviso_lettura?`<div class="avviso">${esc(d.avviso_lettura)}</div>`:''}
+        ${busy?'':msgDoppione(d)}
         ${busy?'':msgAtteso(d)}
         <div class="qgrid">
           <div class="field"><label>Azienda</label>
@@ -1076,6 +1082,14 @@
     const aperti=m.filter(a=>!fatto(a));
     if(!aperti.length) return `<div class="abbinato">✓ DDT atteso dalla ${esc(descrFattura(m[0]))}, già spuntato.</div>`;
     return `<div class="abbinato">✓ È uno dei DDT attesi: ${aperti.map(a=>esc(descrFattura(a))).join(', ')}. Protocollandolo verrà spuntato.</div>`;
+  }
+  // stesso fornitore e stesso numero gia' protocollato: probabile doppione (es. seconda scansione)
+  function msgDoppione(d){
+    if(!d.numero_ddt) return '';
+    const k=chiave(d.numero_ddt), p=pivaN(d.fornitore_piva);
+    const gia=archivio.filter(x=>chiave(x.numero_ddt)===k && (p ? pivaN(x.fornitore_piva)===p : (x.fornitore_denominazione||'').toLowerCase()===(d.fornitore_denominazione||'').toLowerCase()));
+    if(!gia.length) return '';
+    return `<div class="avviso doppione">⚠ Possibile doppione: c'è già ${gia.map(x=>`<b>${esc(x.protocollo)}</b> (n. ${esc(x.numero_ddt)} del ${dataIt(x.data_ddt)})`).join(', ')}. Se è lo stesso documento premi <b>Scarta</b>; se è un altro DDT con lo stesso numero (altro anno) controlla la data.</div>`;
   }
   // dopo protocollo o modifica: dico quali DDT attesi sono stati spuntati
   async function messaggioDopo(id, prima){
