@@ -4,6 +4,7 @@
 // imparando per ogni fornitore dove stanno numero e data. Qui restano:
 //  1. dalla pagina (utente collegato, header Authorization: Bearer <jwt>)
 //       { azione: "aggiorna_attesi" }      rilegge le fatture d'acquisto dal 2021 e aggiorna l'elenco dei DDT attesi
+//                                          (anche dal database due volte al giorno: cron_chiama_funzione, header x-cron-nonce)
 //  2. dallo script "Postino DDT" (Google Apps Script in madamepivotdocuments@gmail.com, campo token)
 //       { azione: "ricevi", token, gmail_message_id, nome_file, file_base64, mittente, oggetto, ricevuta_il }
 //                                          archivia l'allegato: il programma lo legge alla prossima apertura
@@ -112,6 +113,15 @@ async function utenteAutorizzato(req: Request) {
   ]);
   return !!(a || b);
 }
+// chiamata programmata dal database (cron_chiama_funzione): lasciapassare monouso in cron_nonce
+async function cronAutorizzato(req: Request) {
+  const n = req.headers.get("x-cron-nonce");
+  if (!n || !/^[0-9a-f-]{36}$/i.test(n)) return false;
+  const { data } = await sb.from("cron_nonce").update({ usato_il: new Date().toISOString() })
+    .eq("nonce", n).eq("funzione", "ddt-ricevuti").is("usato_il", null)
+    .gte("creato_il", new Date(Date.now() - 10 * 60 * 1000).toISOString()).select("nonce");
+  return !!(data && data.length);
+}
 async function postinoAutorizzato(token: unknown) {
   const atteso = Deno.env.get("DDT_POSTINO_TOKEN");
   if (!atteso || typeof token !== "string" || !token) return false;
@@ -129,7 +139,7 @@ Deno.serve(async (req) => {
 
   try {
     if (azione === "aggiorna_attesi") {
-      if (!(await utenteAutorizzato(req)) && !(await postinoAutorizzato(body.token))) return json({ errore: "non autorizzato" }, 401);
+      if (!(await postinoAutorizzato(body.token)) && !(await cronAutorizzato(req)) && !(await utenteAutorizzato(req))) return json({ errore: "non autorizzato" }, 401);
       return json({ ok: true, ...(await aggiornaAttesi()) });
     }
 

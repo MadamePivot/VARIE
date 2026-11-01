@@ -126,6 +126,7 @@
   .versione{font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:500;color:var(--accent);background:var(--accent-bg);border-radius:6px;padding:2px 7px;vertical-align:middle;margin-left:6px}
   .anno-top{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--ink-2)}
   .anno-top select{width:auto;padding:6px 28px 6px 10px;font-weight:600;font-size:14px;color:var(--accent-2);background-color:var(--accent-bg);border-color:var(--accent-bg)}
+  .chip.attesa{background:var(--warn-bg);color:var(--warn)}
   #toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;opacity:0;pointer-events:none;transition:all .25s;z-index:50}
   #toast.show{opacity:1;transform:translateX(-50%)}
   @media (max-width:760px){ .qgrid{grid-template-columns:1fr 1fr} #drop{flex-wrap:wrap} #drop .acts{margin-left:0} table.arch .hide-s{display:none} }
@@ -230,7 +231,7 @@
   try{ const a=localStorage.getItem('ddt-anno'); if(/^\d{4}$/.test(a||'')) annoSel=a; }catch{}
   const annoAtteso = r => String(r.data_ddt||r.fattura_data||'').slice(0,4);
   // VERSIONE DEL PROGRAMMA: si vede in alto e resta registrata su ogni DDT letto
-  const VERSIONE = 'v7';
+  const VERSIONE = 'v8';
   const VERSIONE_DATA = '31/10/2026';
   const AZ = { 'MADAME PIVOT SRL':'MP', 'MP SPAZIO LAB SRL':'LAB' };
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -266,7 +267,7 @@
   async function carica(){
     const [{data:q,error:e1},{data:a,error:e2}] = await Promise.all([
       supabase.from('ddt_ricevuti').select('*').in('stato',['in_lettura','da_confermare']).order('creato_il'),
-      supabase.from('ddt_ricevuti').select('id,protocollo,protocollo_precedente,anno_protocollo,azienda,fornitore_denominazione,fornitore_piva,numero_ddt,data_ddt,protocollato_il,origine,file_path,file_nome,righe,causale_trasporto,note,email_mittente').eq('stato','protocollato').order('protocollato_il',{ascending:false}).limit(2000),
+      supabase.from('ddt_ricevuti').select('id,protocollo,protocollo_precedente,anno_protocollo,fatt:ddt_riferimenti_fatture(fattura_numero,fattura_data),azienda,fornitore_denominazione,fornitore_piva,numero_ddt,data_ddt,protocollato_il,origine,file_path,file_nome,righe,causale_trasporto,note,email_mittente').eq('stato','protocollato').order('protocollato_il',{ascending:false}).limit(2000),
     ]);
     if(e1||e2){ $('coda').innerHTML=`<div class="empty danger">Errore: ${esc((e1||e2).message)}</div>`; return; }
     coda=q||[]; archivio=a||[];
@@ -1078,7 +1079,8 @@
   /* ---------------- archivio ---------------- */
   let inModifica=null;
   // filtri per colonna e ordinamento dell'archivio
-  const fa={ prot:'', az:'', forn:'', num:'', mese:'' };
+  const fa={ prot:'', az:'', forn:'', num:'', mese:'', fatt:'' };
+  const haFattura = d => (d.fatt||[]).length>0;
   let ordine={ col:'data_ddt', dir:-1 };
   const MESI=['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
   const COLONNE=[
@@ -1087,6 +1089,7 @@
     {k:'fornitore_denominazione', t:'Fornitore', v:d=>(d.fornitore_denominazione||'').toLowerCase()},
     {k:'numero_ddt', t:'DDT n.', v:d=>{ const c=chiave(d.numero_ddt); return c? c.padStart(12,'0') : ''; }},
     {k:'data_ddt', t:'Data DDT', v:d=>d.data_ddt||''},
+    {k:'fattura', t:'Fattura', v:d=>(d.fatt||[]).length ? (d.fatt[0].fattura_data||'')+(d.fatt[0].fattura_numero||'') : ''},
     {k:'protocollato_il', t:'Protocollato', v:d=>d.protocollato_il||'', cls:'hide-s'},
   ];
   function scheletroArchivio(){
@@ -1099,6 +1102,7 @@
         <th><select class="input af" data-f="forn" id="af-forn"><option value="">Tutti i fornitori</option></select></th>
         <th><input class="input af mono" data-f="num" placeholder="n."></th>
         <th><div class="anno-mese"><select class="input af" data-f="mese"><option value="">Mese</option>${MESI.map((m,i)=>`<option value="${String(i+1).padStart(2,'0')}">${m}</option>`).join('')}</select></div></th>
+        <th><select class="input af" data-f="fatt"><option value="">Tutti</option><option value="no">In attesa di fattura</option><option value="si">Con fattura</option></select></th>
         <th class="hide-s"></th><th></th>
       </tr></thead><tbody id="arch-corpo"></tbody></table>
       <div class="empty" id="arch-vuoto" style="display:none;margin-top:10px"></div>`;
@@ -1121,7 +1125,8 @@
       && (!fa.forn || d.fornitore_denominazione===fa.forn)
       && (!fa.num || contiene(d.numero_ddt,fa.num) || (chiave(fa.num) && chiave(d.numero_ddt)===chiave(fa.num)))
       && String(d.anno_protocollo)===annoSel
-      && (!fa.mese || (d.data_ddt||'').slice(5,7)===fa.mese));
+      && (!fa.mese || (d.data_ddt||'').slice(5,7)===fa.mese)
+      && (!fa.fatt || (fa.fatt==='si')===haFattura(d)));
     const col=COLONNE.find(c=>c.k===ordine.col)||COLONNE[5];
     lista.sort((a,b)=>{ const x=col.v(a), y=col.v(b); return (x<y?-1:x>y?1:0)*ordine.dir; });
     document.querySelectorAll('#arch-tab th.ord').forEach(th=>{ const on=th.dataset.col===ordine.col; th.classList.toggle('on',on); th.querySelector('.fr').textContent= on ? (ordine.dir>0?'▲':'▼') : '↕'; });
@@ -1138,9 +1143,10 @@
       <td>${esc(d.fornitore_denominazione||'')}${d.fornitore_piva?`<div class="muted small mono">${esc(d.fornitore_piva)}</div>`:''}</td>
       <td class="mono">${d.numero_ddt?esc(d.numero_ddt):'<span class="danger small">manca</span>'}</td>
       <td>${dataIt(d.data_ddt)}</td>
+      <td class="small">${haFattura(d) ? d.fatt.map(f=>`<span class="muted">n. ${esc(f.fattura_numero||'')} del ${dataIt(f.fattura_data)}</span>`).join('<br>') : '<span class="chip attesa" title="La fattura che cita questo DDT non è ancora arrivata: si collega da sola quando viene importata">in attesa di fattura</span>'}</td>
       <td class="hide-s small muted">${quando(d.protocollato_il)}${d.origine==='email'?' · email':''}</td>
       <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm a-apri">Vedi PDF</button> <button class="btn btn-ghost btn-sm a-mod">Modifica</button></td>
-    </tr>${inModifica===d.id?`<tr class="modifica" data-id="${d.id}"><td colspan="7">
+    </tr>${inModifica===d.id?`<tr class="modifica" data-id="${d.id}"><td colspan="8">
       <div class="mod-grid">
         <div class="field"><label>Fornitore</label><input class="input m" data-k="fornitore_denominazione" list="lista-fornitori" autocomplete="off" value="${esc(d.fornitore_denominazione||'')}"></div>
         <div class="field"><label>P.IVA</label><input class="input m mono" data-k="fornitore_piva" list="lista-pive" autocomplete="off" value="${esc(d.fornitore_piva||'')}"></div>
